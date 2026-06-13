@@ -401,6 +401,52 @@ function MapPage() {
     mapRef.current?.easeTo({ pitch: 60, zoom: 14, duration: 1000 });
   };
 
+  // Save trip to database when completed
+  useEffect(() => {
+    if (tripCompleted && isNavigating && originCoords && destCoords) {
+      const saveTripToBackend = async () => {
+        const token = localStorage.getItem("ecolens:auth_token");
+        const isDemo = localStorage.getItem("ecolens:auth") === "demo";
+        if (!token || isDemo) {
+          console.log("Trip simulation completed in mock/offline mode.");
+          return;
+        }
+
+        try {
+          const response = await fetch("http://localhost:8000/api/exposure/calculate", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              trip: {
+                origin: { lat: originCoords[1], lng: originCoords[0] },
+                destination: { lat: destCoords[1], lng: destCoords[0] },
+                route_type: routeType,
+                segment_ids: ["seg_sim_1", "seg_sim_2", "seg_sim_3"],
+                segment_durations_sec: [120, 180, 240],
+                started_at: new Date(Date.now() - 540000).toISOString(),
+                ended_at: new Date().toISOString(),
+              },
+            }),
+          });
+
+          if (response.ok) {
+            console.log("Trip successfully saved to backend database!");
+          } else {
+            const err = await response.json();
+            console.error("Failed to save trip to backend:", err);
+          }
+        } catch (err) {
+          console.warn("Backend offline, could not save trip to backend:", err);
+        }
+      };
+
+      saveTripToBackend();
+    }
+  }, [tripCompleted, isNavigating, originCoords, destCoords, routeType]);
+
   // Route metrics (mock matching routes list)
   const routeOptions = [
     {

@@ -24,6 +24,9 @@ def user_to_dict(user: User) -> dict:
         "city": user.city,
         "theme": user.theme,
         "default_route_preference": user.default_route_preference,
+        "use_everyday": user.use_everyday,
+        "commute_destination": user.commute_destination,
+        "commute_destination_coords": user.commute_destination_coords,
     }
 
 def profile_to_dict(user: User) -> dict:
@@ -34,6 +37,9 @@ def profile_to_dict(user: User) -> dict:
         "city": user.city,
         "default_route_preference": user.default_route_preference,
         "theme": user.theme,
+        "use_everyday": user.use_everyday,
+        "commute_destination": user.commute_destination,
+        "commute_destination_coords": user.commute_destination_coords,
         "notifications": {
             "pollution_alerts": user.notifications_pollution,
             "forecast_reminders": user.notifications_forecast,
@@ -57,8 +63,15 @@ def ensure_user(db: Session, name="Neil Mathias", email="neil@example.com", pass
     db.refresh(user)
     return user
 
-def create_user(db: Session, name: str, email: str, password: str):
-    user = User(name=name, email=email, password_hash=hash_password(password))
+def create_user(db: Session, name: str, email: str, password: str, use_everyday: bool = False, commute_destination: str | None = None, commute_destination_coords: str | None = None):
+    user = User(
+        name=name,
+        email=email,
+        password_hash=hash_password(password),
+        use_everyday=use_everyday,
+        commute_destination=commute_destination,
+        commute_destination_coords=commute_destination_coords
+    )
     db.add(user)
     db.commit()
     db.refresh(user)
@@ -359,15 +372,27 @@ def dashboard_summary(db: Session, user: User, for_date: date):
     forecast_date = for_date + timedelta(days=1)
     forecast = db.query(LSTMForecast).filter(LSTMForecast.user_id == user.id, LSTMForecast.forecast_date == forecast_date).first()
     if not forecast:
-        forecast = LSTMForecast(
-            user_id=user.id,
-            forecast_date=forecast_date,
-            risk_level="high",
-            recommended_departure="07:45",
-            recommended_route="Residency Road corridor",
-            predicted_pm25=580,
-            reason="Forecasted northeast wind shift increases diesel particulate concentration on Anna Salai corridor",
-        )
+        if user.use_everyday and user.commute_destination:
+            dest_short = user.commute_destination.split(",")[0]
+            forecast = LSTMForecast(
+                user_id=user.id,
+                forecast_date=forecast_date,
+                risk_level="moderate",
+                recommended_departure="08:15",
+                recommended_route=f"Cleanest Route to {dest_short}",
+                predicted_pm25=145.0,
+                reason=f"Optimal window found: PM2.5 levels drop to 145µg near {dest_short} corridor between 8:00 AM and 8:30 AM.",
+            )
+        else:
+            forecast = LSTMForecast(
+                user_id=user.id,
+                forecast_date=forecast_date,
+                risk_level="high",
+                recommended_departure="07:45",
+                recommended_route="Residency Road corridor",
+                predicted_pm25=580.0,
+                reason="Forecasted northeast wind shift increases diesel particulate concentration on Anna Salai corridor",
+            )
     trip_count = db.query(func.count(Trip.id)).filter(Trip.user_id == user.id, func.date(Trip.started_at) == for_date).scalar() or 0
     city_avg_co2 = float(exposure.city_avg_co2 or 350)
     co2_vs_avg_percent = round(((float(exposure.total_co2 or 0) - city_avg_co2) / city_avg_co2) * 100, 1) if city_avg_co2 else 0

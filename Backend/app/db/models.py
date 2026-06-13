@@ -25,6 +25,9 @@ class User(Base):
     notifications_weekly = Column(Boolean, nullable=False, default=True)
     notifications_reroute_suggestions = Column(Boolean, nullable=False, default=True)
     notifications_daily_report = Column(Boolean, nullable=False, default=True)
+    use_everyday = Column(Boolean, nullable=False, default=False)
+    commute_destination = Column(String(255), nullable=True)
+    commute_destination_coords = Column(String(50), nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 

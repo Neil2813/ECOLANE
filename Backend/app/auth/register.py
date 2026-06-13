@@ -11,5 +11,13 @@ router = APIRouter()
 def register(payload: RegisterRequest, db: Session = Depends(get_db)):
     if db.query(User).filter(User.email == payload.email).first():
         raise HTTPException(status_code=409, detail="Email already exists")
-    user = create_user(db, payload.name, payload.email, payload.password)
+    user = create_user(
+        db,
+        payload.name,
+        payload.email,
+        payload.password,
+        use_everyday=payload.use_everyday,
+        commute_destination=payload.commute_destination,
+        commute_destination_coords=payload.commute_destination_coords
+    )
     return {"token": create_tokens_for_user(user), "user": user_to_dict(user)}

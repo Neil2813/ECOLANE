@@ -21,6 +21,9 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8)
     confirm_password: str = Field(min_length=8)
+    use_everyday: Optional[bool] = False
+    commute_destination: Optional[str] = None
+    commute_destination_coords: Optional[str] = None
 
     @model_validator(mode="after")
     def validate_match(self):
@@ -67,3 +70,6 @@ class AuthUser(BaseModel):
     city: str
     theme: str
     default_route_preference: str
+    use_everyday: bool
+    commute_destination: Optional[str] = None
+    commute_destination_coords: Optional[str] = None
