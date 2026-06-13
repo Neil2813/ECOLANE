@@ -101,7 +101,7 @@
     height: 100%;
   }
   body {
-    background-color: var(--color-background);
+    background-color: #050505; /* Desktop backdrop */
     color: var(--color-foreground);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;

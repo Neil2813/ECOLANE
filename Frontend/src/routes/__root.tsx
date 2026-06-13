@@ -105,7 +105,9 @@ function RootShell({ children }: { children: ReactNode }) {
         <HeadContent />
       </head>
       <body>
-        {children}
+        <div className="mx-auto flex min-h-[100dvh] w-full max-w-md flex-col bg-background shadow-2xl sm:border-x sm:border-border relative isolate overflow-hidden">
+          {children}
+        </div>
         <Scripts />
       </body>
     </html>
