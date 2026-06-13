@@ -24,7 +24,8 @@ import { useState, useEffect, useRef } from "react";
 import { MobileShell } from "@/components/mobile-shell";
 import { Map, MapRoute, MapMarker, MarkerContent, type MapRef } from "@/components/ui/map";
 
-const OPEN_STREET_3D_STYLE = "https://tiles.openfreemap.org/styles/liberty";
+const OPEN_STREET_LIGHT_STYLE = "https://tiles.openfreemap.org/styles/liberty";
+const DARK_STYLE = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
 
 export const Route = createFileRoute("/map")({
   head: () => ({ meta: [{ title: "Live Map · EcoLens" }] }),
@@ -74,7 +75,8 @@ function MapPage() {
   const mapRef = useRef<MapRef>(null);
 
   // Map settings
-  const selectedStyle = OPEN_STREET_3D_STYLE;
+  const lightStyle = OPEN_STREET_LIGHT_STYLE;
+  const darkStyle = DARK_STYLE;
 
   // Synchronously load saved navigation state on initialization
   const savedState = (() => {
@@ -495,8 +497,8 @@ function MapPage() {
           pitch={60}
           className="h-full w-full"
           styles={{
-            light: selectedStyle,
-            dark: selectedStyle,
+            light: lightStyle,
+            dark: darkStyle,
           }}
           attributionControl={false}
         >
