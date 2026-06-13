@@ -1,7 +1,16 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Search, User, AlertTriangle, X, Layers, Crosshair, ScanLine, Leaf } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { MobileShell } from "@/components/mobile-shell";
+import { Map, type MapRef } from "@/components/ui/map";
+
+const styles = {
+  default: undefined,
+  openstreetmap: "https://tiles.openfreemap.org/styles/bright",
+  openstreetmap3d: "https://tiles.openfreemap.org/styles/liberty",
+};
+
+type StyleKey = keyof typeof styles;
 
 export const Route = createFileRoute("/map")({
   head: () => ({ meta: [{ title: "Live Map · EcoLens" }] }),
@@ -10,12 +19,43 @@ export const Route = createFileRoute("/map")({
 
 function MapPage() {
   const [alertOpen, setAlertOpen] = useState(true);
+  const mapRef = useRef<MapRef>(null);
+  const [style, setStyle] = useState<StyleKey>("default");
+  const selectedStyle = styles[style];
+  const is3D = style === "openstreetmap3d";
+
+  useEffect(() => {
+    mapRef.current?.easeTo({ pitch: is3D ? 60 : 0, duration: 500 });
+  }, [is3D]);
 
   return (
     <MobileShell>
-      <div className="relative h-[calc(100vh-6rem)] map-bg overflow-hidden">
-        {/* Map grid SVG */}
-        <MapGrid />
+      <div className="relative h-[calc(100vh-6rem)] overflow-hidden">
+        {/* Map Component */}
+        <Map
+          ref={mapRef}
+          center={[-0.1276, 51.5074]}
+          zoom={15}
+          className="h-full w-full"
+          styles={
+            selectedStyle
+              ? { light: selectedStyle, dark: selectedStyle }
+              : undefined
+          }
+        />
+
+        {/* Style Selector Overlay */}
+        <div className="absolute top-20 right-4 z-20">
+          <select
+            value={style}
+            onChange={(e) => setStyle(e.target.value as StyleKey)}
+            className="bg-background text-foreground rounded-md border px-2 py-1 text-sm shadow cursor-pointer focus:outline-none focus:ring-2 focus:ring-eco-orange"
+          >
+            <option value="default">Default (Carto)</option>
+            <option value="openstreetmap">OpenStreetMap</option>
+            <option value="openstreetmap3d">OpenStreetMap 3D</option>
+          </select>
+        </div>
 
         {/* Top search */}
         <div className="absolute inset-x-0 top-0 z-20 px-4 pt-[max(1rem,env(safe-area-inset-top))]">
@@ -110,57 +150,3 @@ function LegendRow({ color, label }: { color: string; label: string }) {
   );
 }
 
-function MapGrid() {
-  // SVG perspective grid evoking the uploaded map view
-  return (
-    <svg
-      viewBox="0 0 400 700"
-      className="absolute inset-0 h-full w-full"
-      preserveAspectRatio="none"
-    >
-      <defs>
-        <linearGradient id="fade" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="oklch(0.72 0.18 150)" stopOpacity="0.05" />
-          <stop offset="60%" stopColor="oklch(0.72 0.18 150)" stopOpacity="0.6" />
-          <stop offset="100%" stopColor="oklch(0.72 0.18 150)" stopOpacity="0.2" />
-        </linearGradient>
-      </defs>
-
-      {/* Horizontal lines (perspective) */}
-      {Array.from({ length: 14 }).map((_, i) => {
-        const y = 180 + i * 38 + i * i * 0.6;
-        return (
-          <line
-            key={"h" + i}
-            x1="-50"
-            y1={y}
-            x2="450"
-            y2={y}
-            stroke="url(#fade)"
-            strokeWidth="1.2"
-          />
-        );
-      })}
-
-      {/* Vertical converging lines */}
-      {Array.from({ length: 15 }).map((_, i) => {
-        const x = i * 30 - 30;
-        return (
-          <line
-            key={"v" + i}
-            x1={x}
-            y1="700"
-            x2={200 + (x - 200) * 0.15}
-            y2="180"
-            stroke="oklch(0.72 0.18 150 / 0.55)"
-            strokeWidth="1"
-          />
-        );
-      })}
-
-      {/* Red high-pollution streaks */}
-      <line x1="0" y1="280" x2="400" y2="290" stroke="oklch(0.65 0.22 25 / 0.55)" strokeWidth="1.4" />
-      <line x1="0" y1="340" x2="400" y2="360" stroke="oklch(0.65 0.22 25 / 0.4)" strokeWidth="1" />
-    </svg>
-  );
-}

@@ -21,7 +21,7 @@ function Splash() {
       const auth = localStorage.getItem("ecolens:auth");
       if (auth) navigate({ to: "/map" });
       else if (seen) navigate({ to: "/auth/signin" });
-      else navigate({ to: "/onboarding/1" });
+      else navigate({ to: "/onboarding/$step", params: { step: "1" } });
     }, 1600);
     return () => clearTimeout(t);
   }, [navigate]);
