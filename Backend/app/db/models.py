@@ -1,6 +1,6 @@
 from datetime import datetime
 import uuid
-from sqlalchemy import Boolean, Column, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Column, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, JSON
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
 from geoalchemy2 import Geometry
@@ -64,7 +64,7 @@ class Trip(Base):
     pm25_avoided = Column(Float, nullable=True)
     co2_grams = Column(Float, nullable=True)
     ecoscore = Column(Integer, nullable=True)
-    polyline = Column(JSONB().with_variant(Text, "sqlite"), nullable=True)
+    polyline = Column(JSON().with_variant(JSONB, "postgresql"), nullable=True)
     started_at = Column(DateTime, nullable=True)
     ended_at = Column(DateTime, nullable=True)
     heat_exposure = Column(Float, nullable=True)
