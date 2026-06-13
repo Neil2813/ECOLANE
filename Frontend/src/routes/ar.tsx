@@ -427,9 +427,6 @@ function ARPage() {
             <Link to="/map" className="flex h-10 w-10 items-center justify-center rounded-full border border-border bg-card/70 backdrop-blur">
               <ArrowLeft className="h-4 w-4" />
             </Link>
-            <Link to="/map" className="flex h-10 w-10 items-center justify-center rounded-full border border-border bg-card/70 backdrop-blur">
-              <Map className="h-4 w-4" />
-            </Link>
           </div>
 
           <div className="mt-3 grid grid-cols-3 divide-x divide-border rounded-2xl border border-border bg-card/70 p-3 backdrop-blur pointer-events-auto relative">
