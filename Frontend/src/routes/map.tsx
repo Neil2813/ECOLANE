@@ -452,6 +452,7 @@ function MapPage() {
             light: selectedStyle,
             dark: selectedStyle,
           }}
+          attributionControl={false}
         >
           {/* User live location marker */}
           {userLocation && !isNavigating && (
