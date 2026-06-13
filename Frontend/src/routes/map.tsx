@@ -72,23 +72,31 @@ function generateRoutePoints(
   return pts;
 }
 
+function readSavedNavigationState() {
+  if (typeof window === "undefined") return null;
+  try {
+    const saved = localStorage.getItem("ecolens:navigation_state");
+    return saved ? JSON.parse(saved) : null;
+  } catch {
+    return null;
+  }
+}
+
 function MapPage() {
   const navigate = useNavigate();
   const mapRef = useRef<MapRef>(null);
+  const [mapReady, setMapReady] = useState(false);
 
   // Map settings
   const lightStyle = LIGHT_STYLE;
   const darkStyle = DARK_STYLE;
 
-  // Synchronously load saved navigation state on initialization
-  const savedState = (() => {
-    try {
-      const saved = localStorage.getItem("ecolens:navigation_state");
-      return saved ? JSON.parse(saved) : null;
-    } catch {
-      return null;
-    }
-  })();
+  // Load saved navigation state on client only (SSR-safe)
+  const [savedState] = useState(readSavedNavigationState);
+
+  useEffect(() => {
+    setMapReady(true);
+  }, []);
 
   // Location/Directions state
   const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
@@ -182,7 +190,7 @@ function MapPage() {
   // Dynamic layers state
   const [layerOpen, setLayerOpen] = useState(false);
   const [activeLayers, setActiveLayers] = useState({
-    air: true,
+    air: false,
     carbon: false,
     heat: false,
     green: false,
@@ -315,7 +323,7 @@ function MapPage() {
           mapRef.current?.flyTo({
             center: flyCenter,
             zoom: savedState.isNavigating ? 16.5 : 13,
-            pitch: savedState.isNavigating ? 50 : 60,
+            pitch: savedState.isNavigating ? 50 : 45,
             duration: 1500,
           });
         }, 500);
@@ -567,7 +575,8 @@ function MapPage() {
   return (
     <MobileShell>
       <div className="relative h-[calc(100vh-6rem)] overflow-hidden bg-background">
-        {/* Real Map Component */}
+        {/* Real Map Component — mount client-side after layout is known */}
+        {mapReady && (
         <Map
           ref={mapRef}
           theme="dark"
@@ -678,6 +687,7 @@ function MapPage() {
           {/* Environmental Overlay Layers */}
           <EnvironmentalOverlays activeLayers={activeLayers} />
         </Map>
+        )}
 
         {/* ==================== NORMAL MAP MODE HUD ==================== */}
         {!isNavigating && (
@@ -1049,6 +1059,13 @@ function MapPage() {
               >
                 <X className="h-3.5 w-3.5" />
               </button>
+              <Link
+                to="/ar"
+                className="flex h-7 w-7 items-center justify-center rounded-full border border-eco-orange/40 bg-eco-orange/15 text-eco-orange hover:bg-eco-orange/25"
+                title="Switch to AR navigation"
+              >
+                <ScanLine className="h-3.5 w-3.5" />
+              </Link>
             </div>
 
             {/* Simulated mid-route environmental hazard spike alert */}

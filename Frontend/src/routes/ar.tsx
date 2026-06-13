@@ -61,6 +61,7 @@ function ARPage() {
 
   // Synchronously load saved navigation state on initialization
   const [navState, setNavState] = useState<any>(() => {
+    if (typeof window === "undefined") return null;
     try {
       const saved = localStorage.getItem("ecolens:navigation_state");
       return saved ? JSON.parse(saved) : null;

@@ -237,13 +237,17 @@ const Map = forwardRef<MapRef, MapProps>(function Map(
       // This is a workaround to avoid race conditions with the style loading
       // else we have to force update every layer on setStyle change
       styleTimeoutRef.current = setTimeout(() => {
+        map.resize();
         setIsStyleLoaded(true);
         if (projection) {
           map.setProjection(projection);
         }
       }, 100);
     };
-    const loadHandler = () => setIsLoaded(true);
+    const loadHandler = () => {
+      map.resize();
+      setIsLoaded(true);
+    };
 
     // Viewport change handler - skip if triggered by internal update
     const handleMove = () => {
