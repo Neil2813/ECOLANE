@@ -297,7 +297,7 @@ function ARPage() {
       setIsScanning(true);
       
       try {
-        const response = await fetch("http://localhost:8000/api/vision/detect", {
+        const response = await fetch("/api/vision/detect", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",

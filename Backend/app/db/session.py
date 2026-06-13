@@ -18,7 +18,8 @@ try:
         engine = create_engine(db_url, pool_pre_ping=True, future=True, connect_args=connect_args)
     else:
         # Try primary database connection
-        engine = create_engine(db_url, pool_pre_ping=True, future=True, connect_args=connect_args)
+        pg_connect_args = {**connect_args, "connect_timeout": 3}
+        engine = create_engine(db_url, pool_pre_ping=True, future=True, connect_args=pg_connect_args)
         # Attempt connection check
         with engine.connect() as conn:
             pass

@@ -1,6 +1,6 @@
 /**
  * EcoLens API client
- * All requests go through the Vite dev-proxy (/api → http://localhost:8000).
+ * All requests go through the Vite dev-proxy (/api → http://127.0.0.1:8000).
  * In production, /api should be served by the backend directly or a reverse proxy.
  */
 

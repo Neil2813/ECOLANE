@@ -16,7 +16,22 @@ class Settings:
     ARGON2_MEMORY_COST: int = int(os.getenv("ARGON2_MEMORY_COST", "65536"))
     HUGGINGFACE_API_KEY: str = os.getenv("HUGGINGFACE_API_KEY", "")
     MOONDREAM_MODEL_URL: str = os.getenv("MOONDREAM_MODEL_URL", "https://api-inference.huggingface.co/models/vikhyatk/moondream2")
-    OPENAQ_API_URL: str = os.getenv("OPENAQ_API_URL", "https://api.openaq.org/v2")
+    # --- Air Quality ---
+    OPENAQ_API_URL: str = os.getenv("OPENAQ_API_URL", "https://api.openaq.org/v2")  # legacy v2 kept for compat
+    OPENAQ_V3_URL: str = os.getenv("OPENAQ_V3_URL", "https://api.openaq.org/v3")
+    OPENAQ_API_KEY: str = os.getenv("OPENAQ_API_KEY", "")  # free key at openaq.org
+    WAQI_TOKEN: str = os.getenv("WAQI_TOKEN", "")          # free token at aqicn.org
+    WAQI_API_URL: str = os.getenv("WAQI_API_URL", "https://api.waqi.info")
+    OPEN_METEO_AQ_URL: str = os.getenv("OPEN_METEO_AQ_URL", "https://air-quality-api.open-meteo.com/v1/air-quality")
+    # --- Weather & Climate ---
+    OPEN_METEO_WEATHER_URL: str = os.getenv("OPEN_METEO_WEATHER_URL", "https://api.open-meteo.com/v1/forecast")
+    # --- Water ---
+    USGS_WATER_URL: str = os.getenv("USGS_WATER_URL", "https://waterservices.usgs.gov/nwis/iv/")
+    EEA_WATER_URL: str = os.getenv("EEA_WATER_URL", "https://www.eea.europa.eu/api/SITE")
+    # --- Natural Events ---
+    NASA_EONET_URL: str = os.getenv("NASA_EONET_URL", "https://eonet.gsfc.nasa.gov/api/v3/events")
+    # --- Cache ---
+    ENV_CACHE_TTL_SECONDS: int = int(os.getenv("ENV_CACHE_TTL_SECONDS", "900"))
     CPCB_API_URL: str = os.getenv("CPCB_API_URL", "https://app.cpcbccr.com/aqi_dashboard/")
     NOMINATIM_URL: str = os.getenv("NOMINATIM_URL", "https://nominatim.openstreetmap.org")
     ERA5_DATA_PATH: str = os.getenv("ERA5_DATA_PATH", "./data/era5_latest.nc")

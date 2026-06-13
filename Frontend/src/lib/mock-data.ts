@@ -13,12 +13,12 @@ export const todayExposure = {
 export const ecoscoreTrend = [62, 65, 70, 68, 74, 71, 84];
 export const weeklyPollution = [
   { day: "M", level: 45, status: "safe" },
-  { day: "T", level: 72, status: "moderate" },
+  { day: "Tu", level: 72, status: "moderate" },
   { day: "W", level: 38, status: "safe" },
-  { day: "T", level: 88, status: "moderate" },
+  { day: "Th", level: 88, status: "moderate" },
   { day: "F", level: 120, status: "high" },
-  { day: "S", level: 52, status: "safe" },
-  { day: "S", level: 41, status: "safe" },
+  { day: "Sa", level: 52, status: "safe" },
+  { day: "Su", level: 41, status: "safe" },
 ];
 
 export const forecast = {

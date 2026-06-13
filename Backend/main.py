@@ -16,6 +16,7 @@ from app.alerts import push
 from app.profile import get, update, delete
 from app.trips import history, detail
 from app.notifications import settings as notification_settings
+from app.environmental import router as env_router
 
 app = FastAPI(title=settings.APP_NAME, version="1.0.0")
 
@@ -79,6 +80,9 @@ app.include_router(detail.router, prefix="/api/trips", tags=["Trips"])
 
 # Notifications
 app.include_router(notification_settings.router, prefix="/api/notifications", tags=["Notifications"])
+
+# Live environmental data (Open-Meteo, OpenAQ, WAQI, USGS, NASA EONET)
+app.include_router(env_router.router, prefix="/api/env", tags=["Environment"])
 
 @app.get("/")
 def root():

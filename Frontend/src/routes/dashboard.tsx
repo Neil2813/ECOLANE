@@ -125,8 +125,8 @@ function DashboardPage() {
           <Card>
             <h3 className="font-semibold">This Week&apos;s Pollution</h3>
             <div className="mt-5 flex items-end justify-between gap-2">
-              {weeklyPollution.map((d) => (
-                <div key={d.day} className="flex flex-1 flex-col items-center gap-2">
+              {weeklyPollution.map((d, idx) => (
+                <div key={`${d.day}-${idx}`} className="flex flex-1 flex-col items-center gap-2">
                   <div className="flex h-24 w-full items-end">
                     <div
                       className={

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 from sqlalchemy import Boolean, Column, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, JSON
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -120,3 +120,28 @@ class EnvironmentalSegment(Base):
     heat_anomaly = Column(Float, nullable=False, default=0)
     ecoscore = Column(Integer, nullable=False, default=0)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class LiveEnvironmentalReading(Base):
+    """Persists a single parameter reading fetched from a live environmental API.
+
+    Keyed by (lat, lon, source, parameter) with a fetched_at timestamp so that
+    the aggregator can determine data freshness before hitting external APIs again.
+    """
+    __tablename__ = "live_environmental_readings"
+    __table_args__ = (
+        UniqueConstraint("lat", "lon", "source", "parameter", name="uq_live_reading"),
+    )
+
+    id = Column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    # Rounded to 2 dp (~1.1 km precision) for locality grouping
+    lat = Column(Float, nullable=False, index=True)
+    lon = Column(Float, nullable=False, index=True)
+    # e.g. "open_meteo_aq", "openaq", "waqi", "usgs", "nasa_eonet", "open_meteo_soil"
+    source = Column(String(30), nullable=False)
+    # e.g. "pm25", "no2", "temperature", "soil_moisture_0_1cm", "aqi"
+    parameter = Column(String(40), nullable=False)
+    value = Column(Float, nullable=True)
+    unit = Column(String(20), nullable=True)
+    raw_json = Column(Text, nullable=True)  # full raw payload for debugging
+    fetched_at = Column(DateTime, nullable=False, default=datetime.utcnow)

@@ -215,15 +215,33 @@ def bbox_to_features(db: Session, bbox: str, layers: list[str] | None = None):
             if not row.geom:
                 continue
             coords = [[min_lng, min_lat], [max_lng, max_lat]]
+            try:
+                from geoalchemy2.shape import to_shape
+                shape = to_shape(row.geom)
+                coords = [[float(x), float(y)] for x, y in shape.coords]
+            except Exception:
+                if isinstance(row.geom, str):
+                    try:
+                        cleaned = row.geom.replace("LINESTRING", "").replace("(", "").replace(")", "").strip()
+                        coords = [[float(c.split()[0]), float(c.split()[1])] for c in cleaned.split(",")]
+                    except Exception:
+                        pass
+            coords = [
+                [lng, lat]
+                for lng, lat in coords
+                if lng is not None and lat is not None
+            ]
+            if len(coords) < 2:
+                continue
             props = {
-                "pm25": row.pm25,
-                "no2": row.no2,
-                "carbon_intensity": row.carbon_intensity,
-                "co2_per_min": row.co2_per_min,
-                "ndvi": row.ndvi,
-                "noise_db": row.noise_db,
-                "heat_anomaly": row.heat_anomaly,
-                "ecoscore": row.ecoscore,
+                "pm25": float(row.pm25 or 0),
+                "no2": float(row.no2 or 0),
+                "carbon_intensity": row.carbon_intensity or "medium",
+                "co2_per_min": float(row.co2_per_min or 0),
+                "ndvi": float(row.ndvi or 0),
+                "noise_db": float(row.noise_db or 0),
+                "heat_anomaly": float(row.heat_anomaly or 0),
+                "ecoscore": int(row.ecoscore or 0),
             }
             if layers:
                 props = {k: v for k, v in props.items() if k in set(layers) or k == "carbon_intensity"}

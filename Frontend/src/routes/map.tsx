@@ -22,9 +22,9 @@ import {
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { MobileShell } from "@/components/mobile-shell";
-import { Map, MapRoute, MapMarker, MarkerContent, type MapRef } from "@/components/ui/map";
+import { Map, MapRoute, MapMarker, MarkerContent, useMap, type MapRef } from "@/components/ui/map";
 import { generateRoutes, type RouteOption } from "@/lib/api/routes";
-import { isDemo } from "@/lib/api/client";
+import { isDemo, apiFetch } from "@/lib/api/client";
 
 const OPEN_STREET_LIGHT_STYLE = "https://tiles.openfreemap.org/styles/liberty";
 const DARK_STYLE = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
@@ -322,7 +322,7 @@ function MapPage() {
   function getPolyline(type: "fastest" | "cleanest_air" | "lowest_carbon"): [number, number][] {
     if (apiRoutes) {
       const r = apiRoutes.find((r) => r.type === type);
-      if (r?.polyline?.length) return r.polyline;
+      if (r?.polyline?.length) return validCoords(r.polyline);
     }
     return endPt ? generateRoutePoints(startPt, endPt, type) : [];
   }
@@ -445,7 +445,7 @@ function MapPage() {
         }
 
         try {
-          const response = await fetch("http://localhost:8000/api/exposure/calculate", {
+          const response = await fetch("/api/exposure/calculate", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -628,15 +628,18 @@ function MapPage() {
           )}
 
           {/* Display Navigating Active Path */}
-          {isNavigating && navPath.length > 0 && (
+          {isNavigating && validCoords(navPath).length > 0 && (
             <MapRoute
               id="active-nav-path"
-              coordinates={navPath}
+              coordinates={validCoords(navPath)}
               color={routeType === "cleanest_air" ? "#22c55e" : routeType === "lowest_carbon" ? "#3b82f6" : "#94a3b8"}
               width={7}
               opacity={0.9}
             />
           )}
+
+          {/* Environmental Overlay Layers */}
+          <EnvironmentalOverlays activeLayers={activeLayers} />
         </Map>
 
         {/* ==================== NORMAL MAP MODE HUD ==================== */}
@@ -658,6 +661,7 @@ function MapPage() {
                     }}
                     placeholder="Where are you going?"
                     className="flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
+                    suppressHydrationWarning
                   />
                   {destText && (
                     <button
@@ -667,6 +671,7 @@ function MapPage() {
                         setIsRoutingMode(false);
                       }}
                       className="text-muted-foreground hover:text-foreground"
+                      suppressHydrationWarning
                     >
                       <X className="h-4 w-4" />
                     </button>
@@ -677,6 +682,7 @@ function MapPage() {
                       setIsDirectionsExpanded(true);
                     }}
                     className="p-1 text-eco-orange hover:text-eco-orange/80 transition-colors"
+                    suppressHydrationWarning
                   >
                     <Navigation className="h-4 w-4 fill-current rotate-45" />
                   </button>
@@ -693,6 +699,7 @@ function MapPage() {
                         setDestText("");
                       }}
                       className="p-1 hover:bg-muted rounded-full text-muted-foreground hover:text-foreground transition-colors"
+                      suppressHydrationWarning
                     >
                       <ArrowLeft className="h-4 w-4" />
                     </button>
@@ -727,6 +734,7 @@ function MapPage() {
                         }}
                         placeholder="Enter start location..."
                         className="flex-1 bg-transparent text-sm text-foreground outline-none border-b border-border py-1"
+                        suppressHydrationWarning
                       />
                       <X
                         className="h-4 w-4 cursor-pointer text-muted-foreground hover:text-foreground"
@@ -758,6 +766,7 @@ function MapPage() {
                         }}
                         placeholder="Search destination..."
                         className="flex-1 bg-transparent text-sm text-foreground outline-none border-b border-border py-1"
+                        suppressHydrationWarning
                       />
                       <X
                         className="h-4 w-4 cursor-pointer text-muted-foreground hover:text-foreground"
@@ -783,6 +792,7 @@ function MapPage() {
                           setDestCoords(tempCoords as [number, number]);
                         }}
                         className="flex items-center gap-1 font-mono text-[10px] text-eco-orange hover:underline"
+                        suppressHydrationWarning
                       >
                         <RefreshCw className="h-3 w-3" /> Swap Locations
                       </button>
@@ -835,6 +845,7 @@ function MapPage() {
                 onClick={handleLocateMe}
                 className="flex h-12 w-12 items-center justify-center rounded-full border border-border bg-card/85 text-foreground shadow-lg backdrop-blur-md transition-transform active:scale-95 hover:bg-card"
                 title="Geolocate Live Position"
+                suppressHydrationWarning
               >
                 <Crosshair className="h-5 w-5 text-eco-blue" />
               </button>
@@ -846,6 +857,7 @@ function MapPage() {
                   layerOpen ? "border-eco-orange bg-eco-orange text-background glow-orange" : "border-border bg-card/85 text-foreground"
                 }`}
                 title="Toggle Environment Overlays"
+                suppressHydrationWarning
               >
                 <Layers className="h-5 w-5" />
               </button>
@@ -880,12 +892,20 @@ function MapPage() {
                         type="checkbox"
                         checked={activeLayers[key as keyof typeof activeLayers]}
                         onChange={(e) =>
-                          setActiveLayers((prev) => ({
-                            ...prev,
-                            [key]: e.target.checked,
-                          }))
+                          setActiveLayers((prev) => {
+                            const next = {
+                              air: false,
+                              carbon: false,
+                              heat: false,
+                              green: false,
+                              noise: false,
+                            };
+                            next[key as keyof typeof activeLayers] = e.target.checked;
+                            return next;
+                          })
                         }
                         className="accent-eco-orange cursor-pointer"
+                        suppressHydrationWarning
                       />
                     </label>
                   ))}
@@ -1124,6 +1144,319 @@ function MapPage() {
       </div>
     </MobileShell>
   );
+}
+
+const ENV_NUMERIC_DEFAULTS: Record<string, number> = {
+  pm25: 50,
+  no2: 20,
+  co2_per_min: 1.5,
+  ndvi: 0.5,
+  noise_db: 55,
+  heat_anomaly: 1.0,
+};
+
+function isValidCoordPair(coord: unknown): coord is [number, number] {
+  return (
+    Array.isArray(coord) &&
+    coord.length >= 2 &&
+    typeof coord[0] === "number" &&
+    typeof coord[1] === "number" &&
+    Number.isFinite(coord[0]) &&
+    Number.isFinite(coord[1])
+  );
+}
+
+function validCoords(coords: [number, number][]): [number, number][] {
+  return coords.filter(isValidCoordPair);
+}
+
+function sanitizeEnvironmentFeatures(data: any) {
+  if (!data?.features) {
+    return { type: "FeatureCollection" as const, features: [] };
+  }
+
+  const features = data.features
+    .map((feature: any) => {
+      const coords = (feature.geometry?.coordinates ?? []).filter(isValidCoordPair);
+      if (coords.length < 2) return null;
+
+      const props = { ...(feature.properties ?? {}) };
+      for (const [key, fallback] of Object.entries(ENV_NUMERIC_DEFAULTS)) {
+        const value = props[key];
+        if (value == null || typeof value !== "number" || !Number.isFinite(value)) {
+          props[key] = fallback;
+        }
+      }
+
+      return {
+        ...feature,
+        geometry: { ...feature.geometry, coordinates: coords },
+        properties: props,
+      };
+    })
+    .filter(Boolean);
+
+  return {
+    type: "FeatureCollection" as const,
+    features,
+    ...(data.updated_at ? { updated_at: data.updated_at } : {}),
+  };
+}
+
+function isMapStyleReady(map: { getStyle: () => unknown } | null) {
+  if (!map) return false;
+  try {
+    return !!map.getStyle();
+  } catch {
+    return false;
+  }
+}
+
+function envNumericExpr(property: string, fallback: number) {
+  return ["coalesce", ["to-number", ["get", property]], fallback];
+}
+
+interface EnvironmentalOverlaysProps {
+  activeLayers: {
+    air: boolean;
+    carbon: boolean;
+    heat: boolean;
+    green: boolean;
+    noise: boolean;
+  };
+}
+
+function EnvironmentalOverlays({ activeLayers }: EnvironmentalOverlaysProps) {
+  const { map, isLoaded } = useMap();
+  const [features, setFeatures] = useState<any>(null);
+
+  // Get active layer key
+  const activeKey = Object.keys(activeLayers).find(
+    (key) => activeLayers[key as keyof typeof activeLayers]
+  ) as "air" | "carbon" | "heat" | "green" | "noise" | undefined;
+
+  useEffect(() => {
+    if (!isLoaded || !map || !activeKey) {
+      setFeatures(null);
+      return;
+    }
+
+    const fetchFeatures = async () => {
+      const bounds = map.getBounds();
+      const bbox = `${bounds.getWest()},${bounds.getSouth()},${bounds.getEast()},${bounds.getNorth()}`;
+      
+      const layerMap = {
+        air: "pm25,no2",
+        carbon: "co2_per_min,carbon_intensity",
+        heat: "heat_anomaly",
+        green: "ndvi",
+        noise: "noise_db",
+      };
+
+      if (isDemo()) {
+        const mockData = generateMockEnvironmentFeatures(bbox, activeKey);
+        setFeatures(sanitizeEnvironmentFeatures(mockData));
+        return;
+      }
+
+      try {
+        const url = `/api/tiles/environment?bbox=${bbox}&layers=${layerMap[activeKey]}`;
+        const data = await apiFetch<any>(url);
+        setFeatures(sanitizeEnvironmentFeatures(data));
+      } catch (err) {
+        console.warn("Failed to fetch environmental overlay features:", err);
+      }
+    };
+
+    fetchFeatures();
+
+    const handleMove = () => {
+      fetchFeatures();
+    };
+
+    map.on("moveend", handleMove);
+    return () => {
+      map.off("moveend", handleMove);
+    };
+  }, [isLoaded, map, activeKey]);
+
+  if (!features || !features.features || features.features.length === 0 || !activeKey) {
+    return null;
+  }
+
+  return (
+    <MapEnvironmentalLayer
+      id={`env-layer-${activeKey}`}
+      data={features}
+      activeKey={activeKey}
+    />
+  );
+}
+
+interface MapEnvironmentalLayerProps {
+  id: string;
+  data: any;
+  activeKey: "air" | "carbon" | "heat" | "green" | "noise";
+}
+
+function MapEnvironmentalLayer({ id, data, activeKey }: MapEnvironmentalLayerProps) {
+  const { map, isLoaded } = useMap();
+  const sourceId = `${id}-source`;
+  const lineLayerId = `${id}-line`;
+  const glowLayerId = `${id}-glow`;
+
+  useEffect(() => {
+    if (!isLoaded || !isMapStyleReady(map) || !data) return;
+
+    const sanitized = sanitizeEnvironmentFeatures(data);
+    if (sanitized.features.length === 0) return;
+
+    if (!map!.getSource(sourceId)) {
+      map!.addSource(sourceId, {
+        type: "geojson",
+        data: sanitized,
+      });
+    } else {
+      const source = map!.getSource(sourceId) as { setData?: (data: unknown) => void };
+      source.setData?.(sanitized);
+    }
+
+    let lineColorExpr: unknown;
+    if (activeKey === "air") {
+      lineColorExpr = [
+        "interpolate",
+        ["linear"],
+        envNumericExpr("pm25", 50),
+        30, "#22c55e",
+        75, "#eab308",
+        150, "#ef4444",
+        300, "#a855f7",
+      ];
+    } else if (activeKey === "heat") {
+      lineColorExpr = [
+        "interpolate",
+        ["linear"],
+        envNumericExpr("heat_anomaly", 1.0),
+        0.5, "#fde047",
+        1.5, "#f97316",
+        3.0, "#ef4444",
+      ];
+    } else if (activeKey === "carbon") {
+      lineColorExpr = [
+        "interpolate",
+        ["linear"],
+        envNumericExpr("co2_per_min", 1.5),
+        1.0, "#3b82f6",
+        3.0, "#f97316",
+        5.0, "#ef4444",
+      ];
+    } else if (activeKey === "green") {
+      lineColorExpr = [
+        "interpolate",
+        ["linear"],
+        envNumericExpr("ndvi", 0.5),
+        0.1, "#78350f",
+        0.4, "#86efac",
+        0.8, "#15803d",
+      ];
+    } else if (activeKey === "noise") {
+      lineColorExpr = [
+        "interpolate",
+        ["linear"],
+        envNumericExpr("noise_db", 55),
+        45, "#22c55e",
+        60, "#eab308",
+        75, "#ef4444",
+      ];
+    } else {
+      lineColorExpr = "#22c55e";
+    }
+
+    if (!map!.getLayer(glowLayerId)) {
+      map!.addLayer({
+        id: glowLayerId,
+        type: "line",
+        source: sourceId,
+        layout: { "line-join": "round", "line-cap": "round" },
+        paint: {
+          "line-color": lineColorExpr,
+          "line-width": 8,
+          "line-opacity": 0.25,
+        },
+      });
+    } else {
+      map!.setPaintProperty(glowLayerId, "line-color", lineColorExpr);
+    }
+
+    if (!map!.getLayer(lineLayerId)) {
+      map!.addLayer({
+        id: lineLayerId,
+        type: "line",
+        source: sourceId,
+        layout: { "line-join": "round", "line-cap": "round" },
+        paint: {
+          "line-color": lineColorExpr,
+          "line-width": 4,
+          "line-opacity": 0.85,
+        },
+      });
+    } else {
+      map!.setPaintProperty(lineLayerId, "line-color", lineColorExpr);
+    }
+
+    return () => {
+      if (!isMapStyleReady(map)) return;
+      try {
+        if (map!.getLayer(lineLayerId)) map!.removeLayer(lineLayerId);
+        if (map!.getLayer(glowLayerId)) map!.removeLayer(glowLayerId);
+        if (map!.getSource(sourceId)) map!.removeSource(sourceId);
+      } catch {
+        // Map may already be destroyed during route changes.
+      }
+    };
+  }, [isLoaded, map, data, sourceId, lineLayerId, glowLayerId, activeKey]);
+
+  return null;
+}
+
+function generateMockEnvironmentFeatures(bbox: string, activeKey: string) {
+  const [min_lng, min_lat, max_lng, max_lat] = bbox.split(",").map(Number);
+  const features = [];
+  for (let i = 0; i < 5; i++) {
+    const sid = `seg_demo_${i}`;
+    const coords = [
+      [min_lng + (i * 0.002) + 0.001, min_lat + (i * 0.002) + 0.001],
+      [min_lng + (i * 0.002) + 0.004, min_lat + (i * 0.002) + 0.0025],
+    ];
+    const h = Math.abs(sid.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0));
+    const pm25 = 40 + (h % 120);
+    const co2 = 1.5 + ((h / 7) % 60) / 10;
+    const noise = 40 + (h % 35);
+    const heat = ((h / 5) % 40) / 10;
+    const ndvi = ((h / 11) % 100) / 100;
+    
+    const props = {
+      pm25: pm25,
+      no2: 15 + (h % 40),
+      carbon_intensity: co2 > 4.5 ? "high" : co2 > 3 ? "medium" : "low",
+      co2_per_min: co2,
+      ndvi: ndvi,
+      noise_db: noise,
+      heat_anomaly: heat,
+      ecoscore: Math.max(0, Math.min(100, Math.round(100 - (0.35 * pm25 + 8 * co2 + 0.9 * noise + 5 * heat - 12 * ndvi)))),
+    };
+    
+    features.push({
+      type: "Feature",
+      geometry: { type: "LineString", coordinates: coords },
+      properties: { segment_id: sid, ...props },
+    });
+  }
+  return {
+    type: "FeatureCollection",
+    updated_at: new Date().toISOString(),
+    features: features
+  };
 }
 
 
