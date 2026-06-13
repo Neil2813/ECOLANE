@@ -107,7 +107,7 @@ class EnvironmentalSegment(Base):
 
     id = Column(UUID(as_uuid=False), primary_key=True, default=_uuid)
     segment_id = Column(String(50), unique=True, nullable=False, index=True)
-    geom = Column(Geometry("LINESTRING", srid=4326), nullable=True)
+    geom = Column(Text().with_variant(Geometry("LINESTRING", srid=4326), "postgresql"), nullable=True)
     pm25 = Column(Float, nullable=False, default=0)
     no2 = Column(Float, nullable=False, default=0)
     carbon_intensity = Column(String(10), nullable=False, default="medium")
