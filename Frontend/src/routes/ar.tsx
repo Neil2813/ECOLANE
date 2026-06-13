@@ -1,7 +1,40 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { ArrowLeft, Map, AlertTriangle, Leaf, Camera } from "lucide-react";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { ArrowLeft, Map, AlertTriangle, Leaf, Camera, Navigation, MapPin, CheckCircle, Award, X } from "lucide-react";
 import { MobileShell } from "@/components/mobile-shell";
 import { useState, useEffect, useRef } from "react";
+
+// Generate intermediate coordinates for simulated paths
+function generateRoutePoints(
+  start: [number, number],
+  end: [number, number],
+  type: string
+): [number, number][] {
+  const steps = 12;
+  const pts: [number, number][] = [];
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    let lng = start[0] + (end[0] - start[0]) * t;
+    let lat = start[1] + (end[1] - start[1]) * t;
+
+    // Bow coordinates to differentiate paths
+    if (i > 0 && i < steps) {
+      const curveOffset = Math.sin(t * Math.PI);
+      if (type === "cleanest_air") {
+        lng += (end[1] - start[1]) * 0.18 * curveOffset;
+        lat -= (end[0] - start[0]) * 0.18 * curveOffset;
+      } else if (type === "lowest_carbon") {
+        lng -= (end[1] - start[1]) * 0.12 * curveOffset;
+        lat += (end[0] - start[0]) * 0.12 * curveOffset;
+      } else {
+        // Fastest has minor zig-zag offsets
+        lng += Math.sin(i) * 0.0015 * curveOffset;
+        lat += Math.cos(i) * 0.0015 * curveOffset;
+      }
+    }
+    pts.push([lng, lat]);
+  }
+  return pts;
+}
 
 export const Route = createFileRoute("/ar")({
   head: () => ({ meta: [{ title: "AR Mode · EcoLens" }] }),
@@ -19,11 +52,22 @@ interface Detection {
 }
 
 function ARPage() {
+  const navigate = useNavigate();
   const videoRef = useRef<HTMLVideoElement>(null);
   const [permissionState, setPermissionState] = useState<"prompt" | "granted" | "denied">("prompt");
   const [videoStream, setVideoStream] = useState<MediaStream | null>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [coords, setCoords] = useState<{ lat: number; lng: number }>({ lat: 12.9716, lng: 77.5946 });
+
+  // Synchronously load saved navigation state on initialization
+  const [navState, setNavState] = useState<any>(() => {
+    try {
+      const saved = localStorage.getItem("ecolens:navigation_state");
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
 
   // Dynamic HUD stats
   const [hudStats, setHudStats] = useState({
@@ -47,6 +91,90 @@ function ARPage() {
       );
     }
   }, []);
+
+  // Simulated movement hook inside AR view
+  useEffect(() => {
+    if (!navState || !navState.isNavigating || navState.tripCompleted || !navState.navPath || navState.navPath.length === 0) return;
+
+    const interval = setInterval(() => {
+      setNavState((prev: any) => {
+        if (!prev) return null;
+        const nextProgress = (prev.navProgress ?? 0) + 1;
+        if (nextProgress >= prev.navPath.length) {
+          clearInterval(interval);
+          const updated = {
+            ...prev,
+            tripCompleted: true,
+          };
+          localStorage.setItem("ecolens:navigation_state", JSON.stringify(updated));
+          return updated;
+        }
+
+        const nextCoords = prev.navPath[nextProgress];
+
+        // AQI values updates
+        let baseAqi = 40 + Math.floor(Math.random() * 20);
+        if (prev.routeType === "fastest") {
+          baseAqi += 65; // higher pollution on highways/fastest route
+        } else if (prev.routeType === "lowest_carbon") {
+          baseAqi += 15;
+        }
+
+        const updated = {
+          ...prev,
+          navProgress: nextProgress,
+          currentNavCoords: nextCoords,
+          simulatedAqi: baseAqi,
+        };
+        localStorage.setItem("ecolens:navigation_state", JSON.stringify(updated));
+        return updated;
+      });
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [navState?.isNavigating, navState?.tripCompleted, navState?.navPath?.length]);
+
+  // Sync HUD stats with the active navigation segment simulated AQI
+  useEffect(() => {
+    if (navState && navState.isNavigating && !navState.tripCompleted) {
+      const pm25Val = Math.round(navState.simulatedAqi / 1.5);
+      const co2Level = navState.simulatedAqi > 100 ? "High" : navState.simulatedAqi > 60 ? "Medium" : "Normal";
+      const co2Color = co2Level === "High" ? "text-eco-orange" : co2Level === "Medium" ? "text-eco-blue" : "text-eco-green";
+
+      setHudStats({
+        aqi: navState.simulatedAqi,
+        pm25: pm25Val,
+        co2: co2Level,
+        co2Tone: co2Color,
+      });
+    }
+  }, [navState?.simulatedAqi, navState?.isNavigating, navState?.tripCompleted]);
+
+  const endRoute = () => {
+    localStorage.removeItem("ecolens:navigation_state");
+    setNavState(null);
+  };
+
+  const startNav = () => {
+    if (!navState || !navState.destCoords) return;
+    const startPt = navState.originCoords || [coords.lng, coords.lat];
+    const endPt = navState.destCoords;
+    const selectedPath = generateRoutePoints(startPt, endPt, navState.routeType || "cleanest_air");
+
+    if (selectedPath.length === 0) return;
+
+    const updated = {
+      ...navState,
+      navPath: selectedPath,
+      navProgress: 0,
+      currentNavCoords: selectedPath[0],
+      isNavigating: true,
+      tripCompleted: false,
+      simulatedAqi: 48,
+    };
+    localStorage.setItem("ecolens:navigation_state", JSON.stringify(updated));
+    setNavState(updated);
+  };
 
   // Request camera and setup video stream
   const startCamera = async () => {
@@ -404,19 +532,225 @@ function ARPage() {
           ))}
 
         {/* Glowing path */}
-        <div className="pointer-events-none absolute bottom-24 left-1/2 -translate-x-1/2 z-10">
-          <div className="h-32 w-1 bg-gradient-to-t from-eco-cream to-transparent" />
+        <div className="pointer-events-none absolute bottom-24 left-1/2 -translate-x-1/2 z-10 flex flex-col items-center">
+          {navState && navState.isNavigating && (
+            <span className="mb-2 font-mono text-[8px] uppercase tracking-wider text-muted-foreground animate-pulse">
+              AR Path Guidance
+            </span>
+          )}
+          <div
+            style={{
+              boxShadow: navState
+                ? navState.routeType === "cleanest_air"
+                  ? "0 0 15px 3px rgba(34, 197, 94, 0.4)"
+                  : navState.routeType === "lowest_carbon"
+                    ? "0 0 15px 3px rgba(59, 130, 246, 0.4)"
+                    : "0 0 15px 3px rgba(249, 115, 22, 0.4)"
+                : "none",
+            }}
+            className={`h-36 w-1.5 rounded-full bg-gradient-to-t ${
+              navState
+                ? navState.routeType === "cleanest_air"
+                  ? "from-eco-green"
+                  : navState.routeType === "lowest_carbon"
+                    ? "from-eco-blue"
+                    : "from-eco-orange"
+                : "from-eco-cream/40"
+            } to-transparent transition-all duration-500`}
+          />
         </div>
 
-        {/* Bottom destination input */}
-        <div className="absolute inset-x-4 bottom-3 z-10">
-          <div className="flex items-center gap-3 rounded-full bg-eco-cream px-5 py-3 text-background shadow-xl">
-            <span className="text-sm text-background/60">Where are you going?</span>
-            <Link to="/map" className="ml-auto flex h-10 w-10 items-center justify-center rounded-full bg-eco-orange text-background hover:brightness-105 active:scale-95 transition-all">
-              <ArrowLeft className="h-4 w-4 -rotate-45" />
-            </Link>
+        {/* Navigation bottom card or routing card */}
+        {navState && navState.destCoords && (
+          <div className="absolute inset-x-4 bottom-3 z-10 flex flex-col gap-3">
+            {!navState.isNavigating ? (
+              /* ROUTE PREVIEW MODE CARD */
+              <div className="rounded-3xl border border-border bg-card/90 p-4 shadow-2xl backdrop-blur-md flex flex-col gap-3">
+                <div className="flex items-center justify-between border-b border-border/50 pb-2">
+                  <h3 className="text-xs font-bold text-foreground">Active Route Shared</h3>
+                  <span className="font-mono text-[9px] text-muted-foreground uppercase">
+                    {navState.routeType.replace("_", " ").toUpperCase()}
+                  </span>
+                </div>
+
+                <div className="flex flex-col gap-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-semibold truncate max-w-[180px] text-eco-cream">
+                      To: {navState.destText || "Selected Destination"}
+                    </span>
+                    <span className="rounded-full bg-eco-green/10 px-2 py-0.5 font-mono text-[9px] font-bold text-eco-green">
+                      EcoRoute Preview
+                    </span>
+                  </div>
+
+                  <div className="flex justify-between items-center text-[10px] font-mono text-muted-foreground">
+                    <div>⏱️ 17 mins · 🗺️ 3.5 km</div>
+                    <div className="flex items-center gap-2">
+                      <span className="flex items-center gap-0.5">
+                        <Leaf className="h-3 w-3 text-eco-green" /> 110µg
+                      </span>
+                      <span className="flex items-center gap-0.5">
+                        <Award className="h-3 w-3 text-eco-blue" /> 180g
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex gap-2 mt-1">
+                  <button
+                    onClick={endRoute}
+                    className="flex-1 rounded-2xl border border-border bg-background/50 py-3 text-xs font-semibold text-muted-foreground hover:bg-card active:scale-[0.98] transition-transform"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={startNav}
+                    className="flex-1 flex items-center justify-center gap-1.5 rounded-2xl bg-eco-orange py-3 text-xs font-semibold text-background hover:brightness-105 active:scale-[0.98] transition-transform shadow-lg shadow-eco-orange/20"
+                  >
+                    <Navigation className="h-3.5 w-3.5 fill-current" /> Start Navigation
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* ACTIVE NAVIGATION HUD */
+              <div className="rounded-3xl border border-border bg-card/90 p-4 shadow-2xl backdrop-blur-md flex flex-col gap-3 pointer-events-auto">
+                <div className="flex justify-between items-center border-b border-border/50 pb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-xs font-bold text-eco-orange animate-pulse">
+                      ● AR Navigation
+                    </span>
+                    <span className="text-[9px] font-mono text-muted-foreground">
+                      {navState.routeType.replace("_", " ").toUpperCase()}
+                    </span>
+                  </div>
+                  <span className={`rounded-full px-2 py-0.5 font-mono text-[9px] font-bold ${
+                    hudStats.aqi <= 50 ? "bg-eco-green/10 text-eco-green" : hudStats.aqi <= 100 ? "bg-eco-orange/10 text-eco-orange" : "bg-eco-red/10 text-eco-red"
+                  }`}>
+                    Live AQI: {hudStats.aqi}
+                  </span>
+                </div>
+
+                {/* Turn instruction */}
+                <div className="flex items-center gap-3 py-1">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-eco-orange text-background">
+                    {navState.navProgress < 3 ? (
+                      <Navigation className="h-4.5 w-4.5 fill-current rotate-45" />
+                    ) : navState.navProgress < 7 ? (
+                      <Navigation className="h-4.5 w-4.5 fill-current -rotate-45" />
+                    ) : (
+                      <MapPin className="h-4.5 w-4.5" />
+                    )}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <span className="font-mono text-[8px] uppercase tracking-wider text-muted-foreground">
+                      Upcoming guidance
+                    </span>
+                    <div className="text-xs font-semibold leading-tight text-foreground truncate">
+                      {navState.navProgress < 3
+                        ? "In 300m, turn left onto Cubbon Rd"
+                        : navState.navProgress < 7
+                          ? "In 500m, keep right toward Residency Rd"
+                          : "Proceed to destination"}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between mt-1.5">
+                  <div>
+                    <div className="text-base font-bold text-foreground">
+                      {Math.max(1, Math.ceil((12 * (navState.navPath.length - navState.navProgress)) / navState.navPath.length))} mins left
+                    </div>
+                    <div className="font-mono text-[9px] text-muted-foreground uppercase">
+                      {(3.5 * (1 - navState.navProgress / navState.navPath.length)).toFixed(1)} km remaining
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col items-end">
+                    <div className="font-mono text-[8px] uppercase tracking-wider text-muted-foreground">
+                      PM2.5 Avoided
+                    </div>
+                    <div className="flex items-center gap-1 text-xs font-bold text-eco-green">
+                      <Leaf className="h-3.5 w-3.5" /> {navState.routeType === "cleanest_air" ? "430 µg" : "120 µg"}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Progress bar */}
+                <div className="relative h-1.5 w-full rounded-full bg-border/50 overflow-hidden mt-1">
+                  <div
+                    className="h-full bg-eco-orange transition-all duration-1000"
+                    style={{ width: `${(navState.navProgress / navState.navPath.length) * 100}%` }}
+                  />
+                </div>
+
+                <button
+                  onClick={endRoute}
+                  className="w-full rounded-2xl bg-eco-red/20 border border-eco-red/30 py-3.5 text-xs font-bold text-eco-red hover:bg-eco-red/30 active:scale-[0.98] transition-all mt-1"
+                >
+                  End Route
+                </button>
+              </div>
+            )}
           </div>
-        </div>
+        )}
+
+        {/* TRIP SUMMARY COMPLETION MODAL */}
+        {navState && navState.tripCompleted && (
+          <div className="absolute inset-0 z-40 bg-background/80 flex items-center justify-center p-6 backdrop-blur-md">
+            <div className="w-full max-w-sm rounded-3xl border border-border bg-card p-6 shadow-2xl text-center flex flex-col gap-4 animate-in zoom-in-95 duration-300">
+              <span className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-eco-green/10 text-eco-green">
+                <CheckCircle className="h-10 w-10" />
+              </span>
+              <div>
+                <h3 className="text-xl font-bold text-foreground">Trip Completed!</h3>
+                <p className="mt-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">EcoLens Carbon Summary</p>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2 border-y border-border py-4 my-2">
+                <div className="flex flex-col items-center">
+                  <span className="text-lg font-bold text-eco-green">88</span>
+                  <span className="font-mono text-[9px] uppercase text-muted-foreground">EcoScore</span>
+                </div>
+                <div className="flex flex-col items-center border-x border-border">
+                  <span className="text-lg font-bold text-eco-green">430µg</span>
+                  <span className="font-mono text-[9px] uppercase text-muted-foreground">PM2.5 Saved</span>
+                </div>
+                <div className="flex flex-col items-center">
+                  <span className="text-lg font-bold text-eco-blue">120g</span>
+                  <span className="font-mono text-[9px] uppercase text-muted-foreground">CO₂ Saved</span>
+                </div>
+              </div>
+
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                Fantastic job! By taking the {navState.routeType.replace("_", " ")} route, you successfully avoided inhaling harmful micro-pollutants and reduced your carbon output.
+              </p>
+
+              <div className="flex gap-3 mt-2">
+                <button
+                  onClick={() => {
+                    localStorage.removeItem("ecolens:navigation_state");
+                    setNavState(null);
+                    // Add trip to dashboard mock metrics
+                    localStorage.setItem("ecolens:lastTripAvoided", "430");
+                  }}
+                  className="flex-1 rounded-2xl border border-border bg-background py-3 text-sm font-semibold text-foreground hover:bg-card"
+                >
+                  Close
+                </button>
+                <button
+                  onClick={() => {
+                    localStorage.removeItem("ecolens:navigation_state");
+                    setNavState(null);
+                    navigate({ to: "/dashboard" });
+                  }}
+                  className="flex-1 flex items-center justify-center gap-1.5 rounded-2xl bg-eco-orange py-3 text-sm font-semibold text-background shadow-lg shadow-eco-orange/25 hover:brightness-105"
+                >
+                  <Award className="h-4 w-4" /> Go to Dashboard
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         <style>{`
           @keyframes sweep {

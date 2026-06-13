@@ -76,18 +76,28 @@ function MapPage() {
   // Map settings
   const selectedStyle = OPEN_STREET_3D_STYLE;
 
+  // Synchronously load saved navigation state on initialization
+  const savedState = (() => {
+    try {
+      const saved = localStorage.getItem("ecolens:navigation_state");
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  })();
+
   // Location/Directions state
   const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
-  const [originText, setOriginText] = useState("My Location");
-  const [destText, setDestText] = useState("");
-  const [originCoords, setOriginCoords] = useState<[number, number] | null>(null);
-  const [destCoords, setDestCoords] = useState<[number, number] | null>(null);
+  const [originText, setOriginText] = useState<string>(savedState?.originText || "My Location");
+  const [destText, setDestText] = useState<string>(savedState?.destText || "");
+  const [originCoords, setOriginCoords] = useState<[number, number] | null>(savedState?.originCoords || null);
+  const [destCoords, setDestCoords] = useState<[number, number] | null>(savedState?.destCoords || null);
 
   // Suggestion boxes
   const [showOriginSuggestions, setShowOriginSuggestions] = useState(false);
   const [showDestSuggestions, setShowDestSuggestions] = useState(false);
-  const [isRoutingMode, setIsRoutingMode] = useState(false);
-  const [isDirectionsExpanded, setIsDirectionsExpanded] = useState(false);
+  const [isRoutingMode, setIsRoutingMode] = useState<boolean>(savedState?.isRoutingMode || false);
+  const [isDirectionsExpanded, setIsDirectionsExpanded] = useState<boolean>(savedState?.isDirectionsExpanded || savedState?.isRoutingMode || false);
 
   // Dynamic suggestions states
   const [originSuggestions, setOriginSuggestions] = useState<LocationSuggestion[]>([]);
@@ -154,16 +164,16 @@ function MapPage() {
   }, [destText]);
 
   // Selected Route Type
-  const [routeType, setRouteType] = useState<"fastest" | "cleanest_air" | "lowest_carbon">("cleanest_air");
+  const [routeType, setRouteType] = useState<"fastest" | "cleanest_air" | "lowest_carbon">(savedState?.routeType || "cleanest_air");
 
   // Navigation Simulation States
-  const [isNavigating, setIsNavigating] = useState(false);
-  const [navProgress, setNavProgress] = useState(0);
-  const [navPath, setNavPath] = useState<[number, number][]>([]);
-  const [currentNavCoords, setCurrentNavCoords] = useState<[number, number] | null>(null);
-  const [simulatedAqi, setSimulatedAqi] = useState(48);
+  const [isNavigating, setIsNavigating] = useState<boolean>(savedState?.isNavigating || false);
+  const [navProgress, setNavProgress] = useState<number>(savedState?.navProgress || 0);
+  const [navPath, setNavPath] = useState<[number, number][]>(savedState?.navPath || []);
+  const [currentNavCoords, setCurrentNavCoords] = useState<[number, number] | null>(savedState?.currentNavCoords || null);
+  const [simulatedAqi, setSimulatedAqi] = useState<number>(savedState?.simulatedAqi || 48);
   const [showSpikeAlert, setShowSpikeAlert] = useState(false);
-  const [tripCompleted, setTripCompleted] = useState(false);
+  const [tripCompleted, setTripCompleted] = useState<boolean>(savedState?.tripCompleted || false);
 
   // Dynamic layers state
   const [layerOpen, setLayerOpen] = useState(false);
@@ -175,6 +185,44 @@ function MapPage() {
     noise: false,
   });
 
+  // Serialize state changes to localStorage
+  useEffect(() => {
+    if (destCoords) {
+      const state = {
+        originText,
+        originCoords,
+        destText,
+        destCoords,
+        isRoutingMode,
+        isDirectionsExpanded,
+        routeType,
+        isNavigating,
+        navProgress,
+        navPath,
+        currentNavCoords,
+        simulatedAqi,
+        tripCompleted,
+      };
+      localStorage.setItem("ecolens:navigation_state", JSON.stringify(state));
+    } else {
+      localStorage.removeItem("ecolens:navigation_state");
+    }
+  }, [
+    originText,
+    originCoords,
+    destText,
+    destCoords,
+    isRoutingMode,
+    isDirectionsExpanded,
+    routeType,
+    isNavigating,
+    navProgress,
+    navPath,
+    currentNavCoords,
+    simulatedAqi,
+    tripCompleted,
+  ]);
+
   // Request location on mount
   useEffect(() => {
     if ("geolocation" in navigator) {
@@ -182,21 +230,45 @@ function MapPage() {
         (pos) => {
           const coords: [number, number] = [pos.coords.longitude, pos.coords.latitude];
           setUserLocation(coords);
-          setOriginCoords(coords);
-          // Fly map to user location
-          mapRef.current?.flyTo({ center: coords, zoom: 14, duration: 1500 });
+          if (!savedState) {
+            setOriginCoords(coords);
+            // Fly map to user location
+            mapRef.current?.flyTo({ center: coords, zoom: 14, duration: 1500 });
+          }
         },
         (err) => {
           console.warn("Geolocation permission denied/failed. Defaulting to Bengaluru.", err);
           const fallback: [number, number] = [77.5946, 12.9716];
           setUserLocation(fallback);
-          setOriginCoords(fallback);
+          if (!savedState) {
+            setOriginCoords(fallback);
+          }
         }
       );
     } else {
       const fallback: [number, number] = [77.5946, 12.9716];
       setUserLocation(fallback);
-      setOriginCoords(fallback);
+      if (!savedState) {
+        setOriginCoords(fallback);
+      }
+    }
+  }, []);
+
+  // Fly to active navigation or routing coordinates if saved state exists
+  useEffect(() => {
+    if (savedState) {
+      const flyCenter = savedState.currentNavCoords || savedState.destCoords || savedState.originCoords;
+      if (flyCenter) {
+        const timer = setTimeout(() => {
+          mapRef.current?.flyTo({
+            center: flyCenter,
+            zoom: savedState.isNavigating ? 16.5 : 13,
+            pitch: savedState.isNavigating ? 50 : 60,
+            duration: 1500,
+          });
+        }, 500);
+        return () => clearTimeout(timer);
+      }
     }
   }, []);
 
