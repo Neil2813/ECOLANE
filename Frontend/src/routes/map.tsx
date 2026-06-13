@@ -752,6 +752,15 @@ function MapPage() {
                 <Layers className="h-5 w-5" />
               </button>
 
+              {/* EcoScore Indicator */}
+              <div 
+                className="flex h-12 w-12 flex-col items-center justify-center rounded-full border border-border bg-card/85 text-foreground shadow-lg backdrop-blur-md"
+                title="Current Location Quality: 84 EcoScore"
+              >
+                <span className="text-[13px] font-bold text-eco-green leading-none">84</span>
+                <span className="text-[7px] font-mono font-semibold uppercase text-muted-foreground leading-none mt-1">EcoScore</span>
+              </div>
+
             </div>
 
 
@@ -847,22 +856,6 @@ function MapPage() {
             {/* Static default legend if not routing */}
             {!isRoutingMode && (
               <>
-
-                {/* Bottom info strip */}
-                <div className="absolute inset-x-4 bottom-3 z-10 flex items-center gap-3 rounded-2xl border border-border bg-card/85 px-4 py-3 backdrop-blur-md shadow-lg">
-                  <span className="relative flex h-9 w-9 items-center justify-center rounded-full bg-eco-green/15">
-                    <Leaf className="h-5 w-5 text-eco-green" />
-                  </span>
-                  <div className="flex-1">
-                    <div className="font-mono text-[9px] uppercase tracking-widest text-muted-foreground">
-                      Current Location Quality
-                    </div>
-                    <div className="text-xs font-semibold">
-                      <span className="text-eco-green">84 EcoScore</span>
-                      <span className="text-muted-foreground"> · AQI: Moderate</span>
-                    </div>
-                  </div>
-                </div>
               </>
             )}
           </>
