@@ -752,14 +752,6 @@ function MapPage() {
                 <Layers className="h-5 w-5" />
               </button>
 
-              {/* AR HUD Shortcut */}
-              <Link
-                to="/ar"
-                className="flex h-12 w-12 items-center justify-center rounded-full border border-eco-orange bg-eco-orange text-background shadow-lg glow-orange transition-transform active:scale-95"
-                title="AR Environmental Overlay"
-              >
-                <ScanLine className="h-5 w-5" />
-              </Link>
             </div>
 
 
