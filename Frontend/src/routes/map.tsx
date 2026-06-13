@@ -855,20 +855,6 @@ function MapPage() {
             {/* Static default legend if not routing */}
             {!isRoutingMode && (
               <>
-                <div className="absolute bottom-32 right-4 z-10 rounded-2xl border border-border bg-card/80 px-4 py-3 backdrop-blur shadow-md flex flex-col gap-1">
-                  <div className="flex items-center gap-2 py-0.5">
-                    <span className="h-2.5 w-2.5 rounded-full bg-eco-red/70" />
-                    <span className="font-mono text-[9px] uppercase tracking-wider">High Risk</span>
-                  </div>
-                  <div className="flex items-center gap-2 py-0.5">
-                    <span className="h-2.5 w-2.5 rounded-full bg-eco-orange" />
-                    <span className="font-mono text-[9px] uppercase tracking-wider">Moderate</span>
-                  </div>
-                  <div className="flex items-center gap-2 py-0.5">
-                    <span className="h-2.5 w-2.5 rounded-full bg-eco-green" />
-                    <span className="font-mono text-[9px] uppercase tracking-wider">Clean Corridor</span>
-                  </div>
-                </div>
 
                 {/* Bottom info strip */}
                 <div className="absolute inset-x-4 bottom-3 z-10 flex items-center gap-3 rounded-2xl border border-border bg-card/85 px-4 py-3 backdrop-blur-md shadow-lg">
