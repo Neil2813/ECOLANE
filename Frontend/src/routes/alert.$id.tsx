@@ -37,7 +37,11 @@ function AlertPage() {
           </p>
         </div>
 
-        <Link to="/routes" className="mt-4 block rounded-2xl bg-eco-orange py-3.5 text-center text-base font-semibold text-background">
+        <Link
+          to="/routes"
+          search={{ olat: 0, olng: 0, dlat: 0, dlng: 0 }}
+          className="mt-4 block rounded-2xl bg-eco-orange py-3.5 text-center text-base font-semibold text-background"
+        >
           Reroute now
         </Link>
         <Link to="/map" className="mt-2 block py-3 text-center text-xs text-muted-foreground">

@@ -1,11 +1,9 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ArrowLeft, Bike, Footprints, Car, SlidersHorizontal, Loader2 } from "lucide-react";
+import { ArrowLeft, Bike, Footprints, Car, SlidersHorizontal, Loader2, History } from "lucide-react";
 import { useState, useEffect } from "react";
 import { MobileShell } from "@/components/mobile-shell";
-import { trips as mockTrips } from "@/lib/mock-data";
 import { cn } from "@/lib/utils";
 import { getTripHistory, type TripRecord } from "@/lib/api/trips";
-import { isDemo } from "@/lib/api/client";
 
 export const Route = createFileRoute("/dashboard/history")({
   head: () => ({ meta: [{ title: "Trip History · EcoLens" }] }),
@@ -39,16 +37,19 @@ function mapTrip(t: TripRecord) {
 
 function HistoryPage() {
   const [active, setActive] = useState<(typeof filters)[number]>("All");
-  const [loading, setLoading] = useState(!isDemo());
-  const [trips, setTrips] = useState(mockTrips);
+  const [loading, setLoading] = useState(true);
+  const [trips, setTrips] = useState<ReturnType<typeof mapTrip>[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (isDemo()) return;
+    setLoading(true);
+    setError(null);
     getTripHistory(1, active === "All" ? "all" : active === "This Week" ? "week" : "month")
-      .then((res) => {
-        if (res.trips.length > 0) setTrips(res.trips.map(mapTrip));
+      .then((res) => setTrips(res.trips.map(mapTrip)))
+      .catch((err) => {
+        console.error("Trip history API error:", err);
+        setError("Could not load trip history.");
       })
-      .catch((err) => console.warn("Trips API error, using mock:", err))
       .finally(() => setLoading(false));
   }, [active]);
 
@@ -89,6 +90,24 @@ function HistoryPage() {
         </div>
 
         <div className="mt-5 space-y-3">
+          {loading && trips.length === 0 && (
+            <div className="flex flex-col items-center gap-3 py-12 text-muted-foreground">
+              <Loader2 className="h-8 w-8 animate-spin" />
+              <p className="text-sm">Loading trips…</p>
+            </div>
+          )}
+          {!loading && error && (
+            <div className="rounded-2xl border border-eco-red/40 bg-eco-red/10 p-4 text-sm text-eco-red">
+              {error}
+            </div>
+          )}
+          {!loading && !error && trips.length === 0 && (
+            <div className="flex flex-col items-center gap-3 py-12 text-muted-foreground">
+              <History className="h-10 w-10 opacity-30" />
+              <p className="text-sm">No trips recorded yet.</p>
+              <p className="text-xs">Complete a navigation session to see your history here.</p>
+            </div>
+          )}
           {trips.map((t) => {
             const Icon = t.mode === "bike" ? Bike : t.mode === "walk" ? Footprints : Car;
             const tone = t.status === "safe" ? "border-l-eco-green" : t.status === "moderate" ? "border-l-eco-orange" : "border-l-eco-red";
@@ -120,18 +139,20 @@ function HistoryPage() {
                 <div className="mt-3 flex items-center justify-between font-mono text-[11px]">
                   <span className="text-muted-foreground">{t.duration}</span>
                   <span className={scoreColor}>
-                    {t.pm25Avoided >= 0 ? `↓ ${t.pm25Avoided}` : `↑ ${Math.abs(t.pm25Avoided)}`} µg
+                    {t.pm25Avoided >= 0 ? `↓ ${t.pm25Avoided.toFixed(0)}` : `↑ ${Math.abs(t.pm25Avoided).toFixed(0)}`} µg
                   </span>
-                  <span className="text-muted-foreground">CO₂ {t.co2}g</span>
+                  <span className="text-muted-foreground">CO₂ {typeof t.co2 === 'number' ? t.co2.toFixed(0) : t.co2}g</span>
                 </div>
               </Link>
             );
           })}
         </div>
 
-        <div className="mt-8 text-center font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
-          End of History
-        </div>
+        {trips.length > 0 && (
+          <div className="mt-8 text-center font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
+            End of History
+          </div>
+        )}
       </div>
     </MobileShell>
   );

@@ -251,14 +251,25 @@ const Map = forwardRef<MapRef, MapProps>(function Map(
       onViewportChangeRef.current?.(getViewport(map));
     };
 
+    const resizeHandler = () => {
+      map.resize();
+    };
+
     map.on("load", loadHandler);
+    map.on("load", resizeHandler);
     map.on("styledata", styleDataHandler);
     map.on("move", handleMove);
     setMapInstance(map);
 
+    const resizeObserver = new ResizeObserver(resizeHandler);
+    resizeObserver.observe(containerRef.current);
+    requestAnimationFrame(resizeHandler);
+
     return () => {
+      resizeObserver.disconnect();
       clearStyleTimeout();
       map.off("load", loadHandler);
+      map.off("load", resizeHandler);
       map.off("styledata", styleDataHandler);
       map.off("move", handleMove);
       map.remove();
@@ -310,7 +321,10 @@ const Map = forwardRef<MapRef, MapProps>(function Map(
     currentStyleRef.current = newStyle;
     setIsStyleLoaded(false);
 
-    mapInstance.setStyle(newStyle, { diff: true });
+    mapInstance.setStyle(newStyle);
+    mapInstance.once("styledata", () => {
+      mapInstance.resize();
+    });
   }, [mapInstance, resolvedTheme, mapStyles, clearStyleTimeout]);
 
   const contextValue = useMemo(

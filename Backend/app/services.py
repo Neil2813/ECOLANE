@@ -206,66 +206,47 @@ def generate_reroute(db: Session, current_position: dict, destination: dict, ori
     return chosen
 
 def bbox_to_features(db: Session, bbox: str, layers: list[str] | None = None):
+    """Return environmental segment features for a bounding box.
+
+    Only returns features that exist in the database — no synthetic fallback.
+    An empty FeatureCollection is returned when no segments have been ingested yet;
+    the frontend handles this gracefully.
+    """
     min_lng, min_lat, max_lng, max_lat = map(float, bbox.split(","))
     features = []
-    # Demo features from DB if any; else synthetic grid.
-    rows = db.query(EnvironmentalSegment).limit(25).all()
-    if rows:
-        for row in rows:
-            if not row.geom:
-                continue
-            coords = [[min_lng, min_lat], [max_lng, max_lat]]
-            try:
-                from geoalchemy2.shape import to_shape
-                shape = to_shape(row.geom)
-                coords = [[float(x), float(y)] for x, y in shape.coords]
-            except Exception:
-                if isinstance(row.geom, str):
-                    try:
-                        cleaned = row.geom.replace("LINESTRING", "").replace("(", "").replace(")", "").strip()
-                        coords = [[float(c.split()[0]), float(c.split()[1])] for c in cleaned.split(",")]
-                    except Exception:
-                        pass
-            coords = [
-                [lng, lat]
-                for lng, lat in coords
-                if lng is not None and lat is not None
-            ]
-            if len(coords) < 2:
-                continue
-            props = {
-                "pm25": float(row.pm25 or 0),
-                "no2": float(row.no2 or 0),
-                "carbon_intensity": row.carbon_intensity or "medium",
-                "co2_per_min": float(row.co2_per_min or 0),
-                "ndvi": float(row.ndvi or 0),
-                "noise_db": float(row.noise_db or 0),
-                "heat_anomaly": float(row.heat_anomaly or 0),
-                "ecoscore": int(row.ecoscore or 0),
-            }
-            if layers:
-                props = {k: v for k, v in props.items() if k in set(layers) or k == "carbon_intensity"}
-            features.append({
-                "type": "Feature",
-                "geometry": {"type": "LineString", "coordinates": coords},
-                "properties": {"segment_id": row.segment_id, **props},
-            })
-    else:
-        for i in range(5):
-            sid = f"seg_demo_{i}"
-            coords = [
-                [min_lng + (i * 0.002), min_lat + (i * 0.002)],
-                [min_lng + (i * 0.002) + 0.003, min_lat + (i * 0.002) + 0.0015],
-            ]
-            seg = _segment_from_db_or_fallback(db, sid)
-            props = {k: seg[k] for k in ["pm25", "no2", "carbon_intensity", "co2_per_min", "ndvi", "noise_db", "heat_anomaly", "ecoscore"]}
-            if layers:
-                props = {k: v for k, v in props.items() if k in set(layers) or k == "carbon_intensity"}
-            features.append({
-                "type": "Feature",
-                "geometry": {"type": "LineString", "coordinates": coords},
-                "properties": {"segment_id": sid, **props},
-            })
+    rows = db.query(EnvironmentalSegment).limit(50).all()
+    for row in rows:
+        if not row.geom:
+            continue
+        coords = [[min_lng, min_lat], [max_lng, max_lat]]
+        try:
+            from geoalchemy2.shape import to_shape
+            shape = to_shape(row.geom)
+            coords = [[float(x), float(y)] for x, y in shape.coords]
+        except Exception:
+            if isinstance(row.geom, str):
+                try:
+                    cleaned = row.geom.replace("LINESTRING", "").replace("(", "").replace(")", "").strip()
+                    coords = [[float(c.split()[0]), float(c.split()[1])] for c in cleaned.split(",")]
+                except Exception:
+                    continue
+        props = {
+            "pm25": row.pm25,
+            "no2": row.no2,
+            "carbon_intensity": row.carbon_intensity,
+            "co2_per_min": row.co2_per_min,
+            "ndvi": row.ndvi,
+            "noise_db": row.noise_db,
+            "heat_anomaly": row.heat_anomaly,
+            "ecoscore": row.ecoscore,
+        }
+        if layers:
+            props = {k: v for k, v in props.items() if k in set(layers) or k == "carbon_intensity"}
+        features.append({
+            "type": "Feature",
+            "geometry": {"type": "LineString", "coordinates": coords},
+            "properties": {"segment_id": row.segment_id, **props},
+        })
     return {"type": "FeatureCollection", "updated_at": _now().isoformat() + "Z", "features": features}
 
 def pollution_for_segments(db: Session, segment_ids: list[str]):
@@ -376,49 +357,86 @@ def calculate_exposure_from_trip(db: Session, user: User, trip_payload: dict):
         "badge_earned": badge,
     }
 
-def dashboard_summary(db: Session, user: User, for_date: date):
-    exposure = db.query(DailyExposure).filter(DailyExposure.user_id == user.id, DailyExposure.date == for_date).first()
-    if not exposure:
-        exposure = DailyExposure(user_id=user.id, date=for_date, total_pm25=340, avoided_pm25=430, total_co2=210, city_avg_co2=350, ecoscore=74, heat_exposure=1.8, noise_avg_db=58)
-    weekly_rows = db.query(DailyExposure).filter(DailyExposure.user_id == user.id).order_by(DailyExposure.date.desc()).limit(7).all()
-    weekly_rows = list(reversed(weekly_rows))
-    if not weekly_rows:
-        weekly_rows = [
-            DailyExposure(date=for_date - timedelta(days=i), total_pm25=520-i*20, ecoscore=62+i*2, user_id=user.id)
-            for i in range(6, -1, -1)
-        ]
-    forecast_date = for_date + timedelta(days=1)
-    forecast = db.query(LSTMForecast).filter(LSTMForecast.user_id == user.id, LSTMForecast.forecast_date == forecast_date).first()
-    if not forecast:
-        if user.use_everyday and user.commute_destination:
-            dest_short = user.commute_destination.split(",")[0]
-            forecast = LSTMForecast(
-                user_id=user.id,
-                forecast_date=forecast_date,
-                risk_level="moderate",
-                recommended_departure="08:15",
-                recommended_route=f"Cleanest Route to {dest_short}",
-                predicted_pm25=145.0,
-                reason=f"Optimal window found: PM2.5 levels drop to 145µg near {dest_short} corridor between 8:00 AM and 8:30 AM.",
-            )
-        else:
-            forecast = LSTMForecast(
-                user_id=user.id,
-                forecast_date=forecast_date,
-                risk_level="high",
-                recommended_departure="07:45",
-                recommended_route="Residency Road corridor",
-                predicted_pm25=580.0,
-                reason="Forecasted northeast wind shift increases diesel particulate concentration on Anna Salai corridor",
-            )
-    trip_count = db.query(func.count(Trip.id)).filter(Trip.user_id == user.id, func.date(Trip.started_at) == for_date).scalar() or 0
-    city_avg_co2 = float(exposure.city_avg_co2 or 350)
-    co2_vs_avg_percent = round(((float(exposure.total_co2 or 0) - city_avg_co2) / city_avg_co2) * 100, 1) if city_avg_co2 else 0
+# Badge display metadata (icon name + colour class)
+_BADGE_META: dict[str, dict] = {
+    "eco_warrior":      {"icon": "trees",  "color": "blue"},
+    "pollution_avoider": {"icon": "shield", "color": "orange"},
+    "carbon_saver":     {"icon": "trees",  "color": "green"},
+    "clean_commuter":   {"icon": "bike",   "color": "green"},
+}
 
-    all_trips = db.query(Trip).filter(Trip.user_id == user.id).order_by(Trip.started_at.desc()).all()
-    badges = []
-    badge_map = {"clean_commuter": "Clean Commuter", "pollution_avoider": "Pollution Avoider", "carbon_saver": "Carbon Saver", "eco_warrior": "Eco Warrior"}
-    seen = set()
+# Day-of-week labels used in weekly_pollution
+_DOW = ["M", "Tu", "W", "Th", "F", "Sa", "Su"]
+
+
+def dashboard_summary(db: Session, user: User, for_date: date):
+    """Return the full dashboard payload for a user and date.
+
+    All values are sourced from real database rows.  When a user has no
+    exposure record for today the response returns zeros — no fabricated
+    demo numbers are injected.
+    """
+    # ── Today's exposure (real zeros if no row yet) ────────────────────────
+    exposure = (
+        db.query(DailyExposure)
+        .filter(DailyExposure.user_id == user.id, DailyExposure.date == for_date)
+        .first()
+    )
+    # Use a zero-value sentinel — do NOT persist it, just read from it.
+    if not exposure:
+        exposure = DailyExposure(
+            user_id=user.id, date=for_date,
+            total_pm25=0, avoided_pm25=0, total_co2=0,
+            city_avg_co2=0, ecoscore=0, heat_exposure=0, noise_avg_db=0,
+        )
+
+    # ── Last 7 days (only real rows) ──────────────────────────────────────
+    weekly_rows = (
+        db.query(DailyExposure)
+        .filter(DailyExposure.user_id == user.id)
+        .order_by(DailyExposure.date.desc())
+        .limit(7)
+        .all()
+    )
+    weekly_rows = list(reversed(weekly_rows))
+
+    # ── Tomorrow's forecast (only real ML-generated rows) ─────────────────
+    forecast_date = for_date + timedelta(days=1)
+    forecast = (
+        db.query(LSTMForecast)
+        .filter(LSTMForecast.user_id == user.id, LSTMForecast.forecast_date == forecast_date)
+        .first()
+    )
+
+    # ── Trip count ────────────────────────────────────────────────────────
+    trip_count = (
+        db.query(func.count(Trip.id))
+        .filter(Trip.user_id == user.id, func.date(Trip.started_at) == for_date)
+        .scalar() or 0
+    )
+
+    # ── CO2 vs city average ───────────────────────────────────────────────
+    city_avg_co2 = float(exposure.city_avg_co2 or 0)
+    co2_vs_avg_percent = (
+        round(((float(exposure.total_co2 or 0) - city_avg_co2) / city_avg_co2) * 100, 1)
+        if city_avg_co2 else None
+    )
+
+    # ── Badges (from real trip history only) ──────────────────────────────
+    all_trips = (
+        db.query(Trip)
+        .filter(Trip.user_id == user.id)
+        .order_by(Trip.started_at.desc())
+        .all()
+    )
+    badge_labels = {
+        "eco_warrior": "Eco Warrior",
+        "pollution_avoider": "Pollution Avoider",
+        "carbon_saver": "Carbon Saver",
+        "clean_commuter": "Clean Commuter",
+    }
+    badges: list[dict] = []
+    seen: set[str] = set()
     for t in all_trips:
         badge = None
         if (t.pm25_avoided or 0) > 200 and (t.co2_grams or 0) < 100 and (t.ecoscore or 0) > 85:
@@ -431,33 +449,79 @@ def dashboard_summary(db: Session, user: User, for_date: date):
             badge = "clean_commuter"
         if badge and badge not in seen:
             seen.add(badge)
-            badges.append({"id": badge, "label": badge_map[badge], "earned_at": (t.started_at.date().isoformat() if t.started_at else for_date.isoformat())})
+            meta = _BADGE_META.get(badge, {"icon": "bike", "color": "green"})
+            badges.append({
+                "id": badge,
+                "label": badge_labels[badge],
+                "icon": meta["icon"],
+                "color": meta["color"],
+                "earned_at": (t.started_at.date().isoformat() if t.started_at else for_date.isoformat()),
+            })
 
-    return {
-        "today": {
-            "date": for_date.isoformat(),
-            "pm25_inhaled": round(float(exposure.total_pm25 or 0), 1),
-            "pm25_avoided": round(float(exposure.avoided_pm25 or 0), 1),
-            "co2_grams": round(float(exposure.total_co2 or 0), 1),
-            "city_avg_co2": city_avg_co2,
-            "co2_vs_avg_percent": co2_vs_avg_percent,
-            "ecoscore": int(exposure.ecoscore or 0),
-            "heat_exposure": round(float(exposure.heat_exposure or 0), 1),
-            "noise_avg_db": round(float(exposure.noise_avg_db or 0), 1),
-            "trips_today": trip_count,
-        },
-        "weekly_trend": [
-            {"date": row.date.isoformat(), "pm25": round(float(row.total_pm25 or 0), 1), "ecoscore": int(row.ecoscore or 0)}
-            for row in weekly_rows
-        ],
-        "forecast": {
+    # ── Weekly pollution bars (day label + level + status) ────────────────
+    weekly_pollution = [
+        {
+            "day": _DOW[row.date.weekday()],
+            "level": round(float(row.total_pm25 or 0), 1),
+            "status": "high" if (row.total_pm25 or 0) > 100 else "moderate" if (row.total_pm25 or 0) > 50 else "safe",
+        }
+        for row in weekly_rows
+    ]
+    ecoscore_trend = [int(r.ecoscore or 0) for r in weekly_rows]
+
+    # ── Ecoscore week-over-week improvement ───────────────────────────────
+    ecoscore_delta = None
+    if len(ecoscore_trend) >= 2:
+        ecoscore_delta = ecoscore_trend[-1] - ecoscore_trend[0]
+
+    # ── Build forecast section ────────────────────────────────────────────
+    forecast_payload: dict | None = None
+    if forecast:
+        # pct_higher: how much worse predicted_pm25 is vs city avg PM2.5
+        city_pm25_ref = float(exposure.total_pm25 or 0) or float(forecast.predicted_pm25 or 0) * 0.6
+        pct_higher = (
+            round(((float(forecast.predicted_pm25) - city_pm25_ref) / city_pm25_ref) * 100)
+            if city_pm25_ref else None
+        )
+        forecast_payload = {
             "forecast_date": forecast.forecast_date.isoformat(),
             "risk_level": forecast.risk_level,
             "recommended_departure": forecast.recommended_departure,
             "recommended_route": forecast.recommended_route,
             "predicted_pm25": float(forecast.predicted_pm25),
+            "pct_higher": pct_higher,
             "reason": forecast.reason,
+        }
+
+    return {
+        # Flat top-level fields (backward-compat with existing frontend)
+        "pm25_inhaled":       round(float(exposure.total_pm25 or 0), 1),
+        "pm25_avoided":       round(float(exposure.avoided_pm25 or 0), 1),
+        "co2_grams":          round(float(exposure.total_co2 or 0), 1),
+        "ecoscore":           int(exposure.ecoscore or 0),
+        "heat_exposure":      round(float(exposure.heat_exposure or 0), 1),
+        "noise_avg_db":       round(float(exposure.noise_avg_db or 0), 1),
+        "trips_today":        trip_count,
+        "city_avg_co2":       city_avg_co2,
+        "co2_vs_avg_percent": co2_vs_avg_percent,
+        "ecoscore_delta":     ecoscore_delta,
+        # Nested sections
+        "today": {
+            "date":               for_date.isoformat(),
+            "pm25_inhaled":       round(float(exposure.total_pm25 or 0), 1),
+            "pm25_avoided":       round(float(exposure.avoided_pm25 or 0), 1),
+            "co2_grams":          round(float(exposure.total_co2 or 0), 1),
+            "city_avg_co2":       city_avg_co2,
+            "co2_vs_avg_percent": co2_vs_avg_percent,
+            "ecoscore":           int(exposure.ecoscore or 0),
+            "heat_exposure":      round(float(exposure.heat_exposure or 0), 1),
+            "noise_avg_db":       round(float(exposure.noise_avg_db or 0), 1),
+            "trips_today":        trip_count,
         },
-        "ecoscore_history": [int(r.ecoscore or 0) for r in weekly_rows],
-        "badges": badges,
+        "weekly_trend":    [{"date": row.date.isoformat(), "pm25": round(float(row.total_pm25 or 0), 1), "ecoscore": int(row.ecoscore or 0)} for row in weekly_rows],
+        "weekly_pollution": weekly_pollution,
+        "ecoscore_trend":   ecoscore_trend,
+        "ecoscore_delta":   ecoscore_delta,
+        "forecast":         forecast_payload,
+        "badges":           badges,
     }

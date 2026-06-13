@@ -1,31 +1,60 @@
 import { apiFetch } from "./client";
 
 export interface DashboardSummary {
+  // Flat top-level fields
   pm25_inhaled: number;
   pm25_avoided: number;
   co2_grams: number;
   ecoscore: number;
-  no2?: number;
-  noise?: number;
-  heat_stress?: string;
-  weekly_pollution?: Array<{
+  heat_exposure?: number;
+  noise_avg_db?: number;
+  trips_today?: number;
+  city_avg_co2?: number;
+  co2_vs_avg_percent?: number | null;
+  ecoscore_delta?: number | null;
+
+  // Nested "today" block (mirrors flat fields)
+  today?: {
+    date: string;
+    pm25_inhaled: number;
+    pm25_avoided: number;
+    co2_grams: number;
+    city_avg_co2: number;
+    co2_vs_avg_percent: number | null;
+    ecoscore: number;
+    heat_exposure: number;
+    noise_avg_db: number;
+    trips_today: number;
+  };
+
+  // Weekly breakdowns
+  weekly_trend?: { date: string; pm25: number; ecoscore: number }[];
+  weekly_pollution?: {
     day: string;
     level: number;
     status: "safe" | "moderate" | "high";
-  }>;
+  }[];
   ecoscore_trend?: number[];
+
+  // Tomorrow's forecast
   forecast?: {
-    risk: string;
-    pct_higher: number;
-    departure: string;
-    route: string;
-  };
-  badges?: Array<{
+    forecast_date?: string;
+    risk_level: string;
+    pct_higher?: number | null;
+    recommended_departure: string;
+    recommended_route: string;
+    predicted_pm25: number;
+    reason?: string | null;
+  } | null;
+
+  // Earned badges
+  badges?: {
     id: string;
     label: string;
     icon: string;
     color: string;
-  }>;
+    earned_at: string;
+  }[];
 }
 
 export async function getDashboardSummary(

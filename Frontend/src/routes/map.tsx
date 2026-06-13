@@ -26,7 +26,7 @@ import { Map, MapRoute, MapMarker, MarkerContent, useMap, type MapRef } from "@/
 import { generateRoutes, type RouteOption } from "@/lib/api/routes";
 import { isDemo, apiFetch } from "@/lib/api/client";
 
-const OPEN_STREET_LIGHT_STYLE = "https://tiles.openfreemap.org/styles/liberty";
+const LIGHT_STYLE = "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json";
 const DARK_STYLE = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
 
 export const Route = createFileRoute("/map")({
@@ -77,7 +77,7 @@ function MapPage() {
   const mapRef = useRef<MapRef>(null);
 
   // Map settings
-  const lightStyle = OPEN_STREET_LIGHT_STYLE;
+  const lightStyle = LIGHT_STYLE;
   const darkStyle = DARK_STYLE;
 
   // Synchronously load saved navigation state on initialization
@@ -193,6 +193,16 @@ function MapPage() {
   const [apiRoutes, setApiRoutes] = useState<RouteOption[] | null>(null);
   const [fetchingRoutes, setFetchingRoutes] = useState(false);
 
+  // Live EcoScore for current user position
+  const [liveEcoScore, setLiveEcoScore] = useState<number | null>(null);
+
+  // Trip completion result from the calculate API
+  const [tripResult, setTripResult] = useState<{
+    ecoscore: number;
+    pm25_avoided: number;
+    co2_grams: number;
+  } | null>(null);
+
   // Serialize state changes to localStorage
   useEffect(() => {
     if (destCoords) {
@@ -276,6 +286,25 @@ function MapPage() {
       }
     }
   }, []);
+
+  // Fetch live EcoScore for user's current location
+  useEffect(() => {
+    if (!userLocation || isDemo()) return;
+    const [lng, lat] = userLocation;
+    const token = localStorage.getItem("ecolens:auth_token");
+    if (!token) return;
+    fetch(`/api/env/composite?lat=${lat}&lon=${lng}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => {
+        if (!data?.air_quality) return;
+        const pm25 = data.air_quality.pm25 ?? 0;
+        // Simple ecoscore from PM2.5: 100 at 0µg, 0 at 200µg
+        setLiveEcoScore(Math.max(0, Math.min(100, Math.round(100 - pm25 / 2))));
+      })
+      .catch(() => { /* silent — EcoScore stays null */ });
+  }, [userLocation]);
 
   // Fly to active navigation or routing coordinates if saved state exists
   useEffect(() => {
@@ -430,7 +459,7 @@ function MapPage() {
     setIsNavigating(false);
     setTripCompleted(false);
     setShowSpikeAlert(false);
-    mapRef.current?.easeTo({ pitch: 60, zoom: 14, duration: 1000 });
+    mapRef.current?.easeTo({ pitch: 45, zoom: 14, duration: 1000 });
   };
 
   // Save trip to database when completed
@@ -465,7 +494,14 @@ function MapPage() {
           });
 
           if (response.ok) {
+            const result = await response.json();
             console.log("Trip successfully saved to backend database!");
+            // Store real metrics for the completion modal
+            setTripResult({
+              ecoscore: result.ecoscore ?? 0,
+              pm25_avoided: result.pm25_avoided ?? 0,
+              co2_grams: result.co2_grams ?? 0,
+            });
           } else {
             const err = await response.json();
             console.error("Failed to save trip to backend:", err);
@@ -534,10 +570,11 @@ function MapPage() {
         {/* Real Map Component */}
         <Map
           ref={mapRef}
+          theme="dark"
           center={userLocation || [77.5946, 12.9716]}
           zoom={13}
-          pitch={60}
-          className="h-full w-full"
+          pitch={45}
+          className="absolute inset-0 h-full w-full min-h-[300px]"
           styles={{
             light: lightStyle,
             dark: darkStyle,
@@ -863,11 +900,13 @@ function MapPage() {
               </button>
 
               {/* EcoScore Indicator */}
-              <div 
+              <div
                 className="flex h-12 w-12 flex-col items-center justify-center rounded-full border border-border bg-card/85 text-foreground shadow-lg backdrop-blur-md"
-                title="Current Location Quality: 84 EcoScore"
+                title={liveEcoScore != null ? `Current Location EcoScore: ${liveEcoScore}` : "Loading EcoScore…"}
               >
-                <span className="text-[13px] font-bold text-eco-green leading-none">84</span>
+                <span className="text-[13px] font-bold text-eco-green leading-none">
+                  {liveEcoScore != null ? liveEcoScore : "–"}
+                </span>
                 <span className="text-[7px] font-mono font-semibold uppercase text-muted-foreground leading-none mt-1">EcoScore</span>
               </div>
 
@@ -1048,11 +1087,20 @@ function MapPage() {
                   <span className="font-mono text-xs font-bold text-eco-orange animate-pulse">● Navigating</span>
                   <span className="text-[10px] font-mono text-muted-foreground">{routeType.replace("_", " ").toUpperCase()}</span>
                 </div>
+                <div className="flex items-center gap-2">
+                  <Link
+                    to="/ar"
+                    className="flex h-8 items-center gap-1 rounded-full border border-border bg-background px-2.5 text-[10px] font-semibold text-foreground hover:bg-card"
+                  >
+                    <ScanLine className="h-3.5 w-3.5 text-eco-orange" />
+                    AR
+                  </Link>
                 <span className={`rounded-full px-2 py-0.5 font-mono text-[9px] font-bold ${
                   simulatedAqi <= 50 ? "bg-eco-green/10 text-eco-green" : simulatedAqi <= 100 ? "bg-eco-orange/10 text-eco-orange" : "bg-eco-red/10 text-eco-red"
                 }`}>
                   Live Segment AQI: {simulatedAqi}
                 </span>
+                </div>
               </div>
 
               <div className="flex items-center justify-between">
@@ -1098,15 +1146,21 @@ function MapPage() {
 
               <div className="grid grid-cols-3 gap-2 border-y border-border py-4 my-2">
                 <div className="flex flex-col items-center">
-                  <span className="text-lg font-bold text-eco-green">88</span>
+                  <span className="text-lg font-bold text-eco-green">
+                    {tripResult?.ecoscore ?? "–"}
+                  </span>
                   <span className="font-mono text-[9px] uppercase text-muted-foreground">EcoScore</span>
                 </div>
                 <div className="flex flex-col items-center border-x border-border">
-                  <span className="text-lg font-bold text-eco-green">430µg</span>
+                  <span className="text-lg font-bold text-eco-green">
+                    {tripResult != null ? `${tripResult.pm25_avoided.toFixed(0)}µg` : "–"}
+                  </span>
                   <span className="font-mono text-[9px] uppercase text-muted-foreground">PM2.5 Saved</span>
                 </div>
                 <div className="flex flex-col items-center">
-                  <span className="text-lg font-bold text-eco-blue">120g</span>
+                  <span className="text-lg font-bold text-eco-blue">
+                    {tripResult != null ? `${tripResult.co2_grams.toFixed(0)}g` : "–"}
+                  </span>
                   <span className="font-mono text-[9px] uppercase text-muted-foreground">CO₂ Saved</span>
                 </div>
               </div>
@@ -1120,8 +1174,7 @@ function MapPage() {
                   onClick={() => {
                     setTripCompleted(false);
                     setIsNavigating(false);
-                    // Add trip to dashboard mock metrics
-                    localStorage.setItem("ecolens:lastTripAvoided", "430");
+                    setTripResult(null);
                   }}
                   className="flex-1 rounded-2xl border border-border bg-background py-3 text-sm font-semibold text-foreground hover:bg-card"
                 >
@@ -1379,13 +1432,15 @@ function MapEnvironmentalLayer({ id, data, activeKey }: MapEnvironmentalLayerPro
         source: sourceId,
         layout: { "line-join": "round", "line-cap": "round" },
         paint: {
-          "line-color": lineColorExpr,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          "line-color": lineColorExpr as any,
           "line-width": 8,
           "line-opacity": 0.25,
         },
       });
     } else {
-      map!.setPaintProperty(glowLayerId, "line-color", lineColorExpr);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      map!.setPaintProperty(glowLayerId, "line-color", lineColorExpr as any);
     }
 
     if (!map!.getLayer(lineLayerId)) {
@@ -1395,13 +1450,15 @@ function MapEnvironmentalLayer({ id, data, activeKey }: MapEnvironmentalLayerPro
         source: sourceId,
         layout: { "line-join": "round", "line-cap": "round" },
         paint: {
-          "line-color": lineColorExpr,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          "line-color": lineColorExpr as any,
           "line-width": 4,
           "line-opacity": 0.85,
         },
       });
     } else {
-      map!.setPaintProperty(lineLayerId, "line-color", lineColorExpr);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      map!.setPaintProperty(lineLayerId, "line-color", lineColorExpr as any);
     }
 
     return () => {
