@@ -1,0 +1,162 @@
+@import "tailwindcss" source(none);
+@import "tw-animate-css";
+@source "../src";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-eco-orange: var(--eco-orange);
+  --color-eco-green: var(--eco-green);
+  --color-eco-blue: var(--eco-blue);
+  --color-eco-red: var(--eco-red);
+  --color-eco-cream: var(--eco-cream);
+
+  --font-mono: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+  --font-sans: "Inter", system-ui, sans-serif;
+}
+
+:root {
+  --radius: 0.875rem;
+
+  /* Dark = default for EcoLens */
+  --background: oklch(0.13 0.012 50);
+  --foreground: oklch(0.96 0.015 60);
+  --card: oklch(0.18 0.018 50);
+  --card-foreground: oklch(0.96 0.015 60);
+  --popover: oklch(0.18 0.018 50);
+  --popover-foreground: oklch(0.96 0.015 60);
+  --primary: oklch(0.72 0.19 45);              /* orange */
+  --primary-foreground: oklch(0.15 0.02 50);
+  --secondary: oklch(0.22 0.02 50);
+  --secondary-foreground: oklch(0.96 0.015 60);
+  --muted: oklch(0.22 0.015 50);
+  --muted-foreground: oklch(0.68 0.02 60);
+  --accent: oklch(0.72 0.19 45);
+  --accent-foreground: oklch(0.15 0.02 50);
+  --destructive: oklch(0.62 0.22 25);
+  --destructive-foreground: oklch(0.98 0 0);
+  --border: oklch(0.26 0.02 50);
+  --input: oklch(0.22 0.02 50);
+  --ring: oklch(0.72 0.19 45);
+
+  --eco-orange: oklch(0.72 0.19 45);
+  --eco-green: oklch(0.72 0.18 150);
+  --eco-blue: oklch(0.68 0.15 230);
+  --eco-red: oklch(0.65 0.22 25);
+  --eco-cream: oklch(0.94 0.02 70);
+}
+
+.light {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.13 0.02 50);
+  --card: oklch(0.97 0.005 60);
+  --card-foreground: oklch(0.13 0.02 50);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.13 0.02 50);
+  --primary: oklch(0.68 0.2 45);
+  --primary-foreground: oklch(0.98 0 0);
+  --secondary: oklch(0.95 0.01 60);
+  --secondary-foreground: oklch(0.13 0.02 50);
+  --muted: oklch(0.95 0.01 60);
+  --muted-foreground: oklch(0.5 0.02 60);
+  --accent: oklch(0.68 0.2 45);
+  --accent-foreground: oklch(0.98 0 0);
+  --border: oklch(0.9 0.01 60);
+  --input: oklch(0.93 0.01 60);
+  --ring: oklch(0.68 0.2 45);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+  html, body, #root {
+    height: 100%;
+  }
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    overscroll-behavior: none;
+  }
+}
+
+@layer utilities {
+  .font-mono { font-family: var(--font-mono); }
+  .text-eco-orange { color: var(--eco-orange); }
+  .text-eco-green { color: var(--eco-green); }
+  .text-eco-blue { color: var(--eco-blue); }
+  .text-eco-red { color: var(--eco-red); }
+  .text-eco-cream { color: var(--eco-cream); }
+  .bg-eco-orange { background-color: var(--eco-orange); }
+  .bg-eco-green { background-color: var(--eco-green); }
+  .bg-eco-blue { background-color: var(--eco-blue); }
+  .bg-eco-red { background-color: var(--eco-red); }
+  .border-eco-orange { border-color: var(--eco-orange); }
+  .border-eco-green { border-color: var(--eco-green); }
+
+  .glow-orange {
+    box-shadow: 0 0 40px -8px oklch(0.72 0.19 45 / 0.5);
+  }
+  .glow-green {
+    box-shadow: 0 0 40px -8px oklch(0.72 0.18 150 / 0.5);
+  }
+
+  .grid-bg {
+    background-image:
+      linear-gradient(to right, oklch(0.72 0.19 45 / 0.06) 1px, transparent 1px),
+      linear-gradient(to bottom, oklch(0.72 0.19 45 / 0.06) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+
+  .map-bg {
+    background:
+      radial-gradient(ellipse at 20% 30%, oklch(0.72 0.18 150 / 0.18), transparent 55%),
+      radial-gradient(ellipse at 80% 70%, oklch(0.65 0.22 25 / 0.12), transparent 50%),
+      linear-gradient(180deg, oklch(0.1 0.01 50), oklch(0.13 0.012 50));
+  }
+
+  .scrollbar-hide::-webkit-scrollbar { display: none; }
+  .scrollbar-hide { scrollbar-width: none; }
+}
+
+@keyframes pulse-ring {
+  0% { transform: scale(0.9); opacity: 0.8; }
+  100% { transform: scale(1.8); opacity: 0; }
+}
+.pulse-ring::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: var(--eco-green);
+  animation: pulse-ring 2s ease-out infinite;
+}
