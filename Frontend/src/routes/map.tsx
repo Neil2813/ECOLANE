@@ -23,6 +23,8 @@ import {
 import { useState, useEffect, useRef } from "react";
 import { MobileShell } from "@/components/mobile-shell";
 import { Map, MapRoute, MapMarker, MarkerContent, type MapRef } from "@/components/ui/map";
+import { generateRoutes, type RouteOption } from "@/lib/api/routes";
+import { isDemo } from "@/lib/api/client";
 
 const OPEN_STREET_LIGHT_STYLE = "https://tiles.openfreemap.org/styles/liberty";
 const DARK_STYLE = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
@@ -187,6 +189,10 @@ function MapPage() {
     noise: false,
   });
 
+  // Backend-fetched routes (null = not yet fetched / demo mode)
+  const [apiRoutes, setApiRoutes] = useState<RouteOption[] | null>(null);
+  const [fetchingRoutes, setFetchingRoutes] = useState(false);
+
   // Serialize state changes to localStorage
   useEffect(() => {
     if (destCoords) {
@@ -224,6 +230,21 @@ function MapPage() {
     simulatedAqi,
     tripCompleted,
   ]);
+
+  // Fetch real routes from the backend whenever origin + destination are set
+  useEffect(() => {
+    if (!destCoords || !originCoords || isDemo()) return;
+    const origin = { lat: originCoords[1], lng: originCoords[0] };
+    const destination = { lat: destCoords[1], lng: destCoords[0] };
+    setFetchingRoutes(true);
+    setApiRoutes(null);
+    generateRoutes(origin, destination)
+      .then((routes) => {
+        if (routes.length > 0) setApiRoutes(routes);
+      })
+      .catch((err) => console.warn("Route generation API error, using simulation:", err))
+      .finally(() => setFetchingRoutes(false));
+  }, [destCoords, originCoords]);
 
   // Request location on mount
   useEffect(() => {
@@ -297,10 +318,19 @@ function MapPage() {
   const startPt = originCoords || userLocation || [77.5946, 12.9716];
   const endPt = destCoords;
 
+  // Helper to get polyline: prefer backend API data, fall back to client-side bezier
+  function getPolyline(type: "fastest" | "cleanest_air" | "lowest_carbon"): [number, number][] {
+    if (apiRoutes) {
+      const r = apiRoutes.find((r) => r.type === type);
+      if (r?.polyline?.length) return r.polyline;
+    }
+    return endPt ? generateRoutePoints(startPt, endPt, type) : [];
+  }
+
   const paths = {
-    fastest: endPt ? generateRoutePoints(startPt, endPt, "fastest") : [],
-    cleanest_air: endPt ? generateRoutePoints(startPt, endPt, "cleanest_air") : [],
-    lowest_carbon: endPt ? generateRoutePoints(startPt, endPt, "lowest_carbon") : [],
+    fastest: getPolyline("fastest"),
+    cleanest_air: getPolyline("cleanest_air"),
+    lowest_carbon: getPolyline("lowest_carbon"),
   };
 
   // Select a suggestion
@@ -449,10 +479,10 @@ function MapPage() {
     }
   }, [tripCompleted, isNavigating, originCoords, destCoords, routeType]);
 
-  // Route metrics (mock matching routes list)
-  const routeOptions = [
+  // Route metrics — prefer API data, fall back to static defaults
+  const staticRouteDefaults = [
     {
-      id: "cleanest_air",
+      id: "cleanest_air" as const,
       label: "Cleanest Air",
       duration: 17,
       pm25: 110,
@@ -463,7 +493,7 @@ function MapPage() {
       recommended: true,
     },
     {
-      id: "lowest_carbon",
+      id: "lowest_carbon" as const,
       label: "Lowest Carbon",
       duration: 16,
       pm25: 210,
@@ -474,7 +504,7 @@ function MapPage() {
       recommended: false,
     },
     {
-      id: "fastest",
+      id: "fastest" as const,
       label: "Fastest",
       duration: 14,
       pm25: 340,
@@ -485,6 +515,18 @@ function MapPage() {
       recommended: false,
     },
   ];
+
+  const routeOptions = staticRouteDefaults.map((def) => {
+    const apiRoute = apiRoutes?.find((r) => r.type === def.id);
+    return {
+      ...def,
+      duration: apiRoute?.duration_min ?? def.duration,
+      pm25: apiRoute?.pm25_exposure != null ? Math.round(apiRoute.pm25_exposure) : def.pm25,
+      co2: apiRoute?.co2_grams != null ? Math.round(apiRoute.co2_grams) : def.co2,
+      ecoscore: apiRoute?.ecoscore ?? def.ecoscore,
+      recommended: apiRoute?.recommended ?? def.recommended,
+    };
+  });
 
   return (
     <MobileShell>
@@ -654,6 +696,12 @@ function MapPage() {
                       <ArrowLeft className="h-4 w-4" />
                     </button>
                     <span className="font-semibold text-xs text-foreground font-mono">Plan EcoRoute</span>
+                    {fetchingRoutes && (
+                      <span className="ml-auto flex items-center gap-1 font-mono text-[10px] text-eco-orange">
+                        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-eco-orange" />
+                        Fetching routes…
+                      </span>
+                    )}
                   </div>
 
                   <div className="flex flex-col gap-3">

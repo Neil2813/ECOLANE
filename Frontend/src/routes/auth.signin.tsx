@@ -1,7 +1,8 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { Mail, Lock, Eye, EyeOff, LogIn } from "lucide-react";
+import { Mail, Lock, Eye, EyeOff, LogIn, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { EcoLogo } from "@/components/eco-logo";
+import { loginUser, persistAuth } from "@/lib/api/auth";
 
 export const Route = createFileRoute("/auth/signin")({
   component: SignInPage,
@@ -10,11 +11,32 @@ export const Route = createFileRoute("/auth/signin")({
 function SignInPage() {
   const navigate = useNavigate();
   const [show, setShow] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    localStorage.setItem("ecolens:auth", "demo");
-    navigate({ to: "/map" });
+    setError(null);
+    setLoading(true);
+    try {
+      const data = await loginUser(email, password);
+      persistAuth(data);
+      navigate({ to: "/map" });
+    } catch (err: unknown) {
+      // Network error → demo mode; API error → show message
+      const isNetworkError = err instanceof TypeError;
+      if (isNetworkError) {
+        console.warn("Backend offline. Falling back to demo mode.");
+        localStorage.setItem("ecolens:auth", "demo");
+        navigate({ to: "/map" });
+      } else {
+        setError((err as Error).message || "Invalid email or password.");
+      }
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -36,6 +58,8 @@ function SignInPage() {
             <input
               type="email"
               required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
               placeholder="operator@ecolens.net"
               className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
             />
@@ -54,8 +78,9 @@ function SignInPage() {
               <input
                 type={show ? "text" : "password"}
                 required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
-                defaultValue="demo1234"
                 className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
               />
               <button
@@ -69,11 +94,22 @@ function SignInPage() {
           </div>
         </div>
 
+        {error && (
+          <div className="mt-4 rounded-xl bg-eco-red/10 px-4 py-2.5 text-xs text-eco-red border border-eco-red/20">
+            {error}
+          </div>
+        )}
+
         <button
           type="submit"
-          className="mt-6 flex w-full items-center justify-center gap-2 rounded-2xl bg-eco-orange py-3.5 text-base font-semibold text-background transition-transform active:scale-[0.98]"
+          disabled={loading}
+          className="mt-6 flex w-full items-center justify-center gap-2 rounded-2xl bg-eco-orange py-3.5 text-base font-semibold text-background transition-transform active:scale-[0.98] disabled:opacity-60"
         >
-          Sign In <LogIn className="h-4 w-4" />
+          {loading ? (
+            <><Loader2 className="h-4 w-4 animate-spin" /> Signing in…</>
+          ) : (
+            <>Sign In <LogIn className="h-4 w-4" /></>
+          )}
         </button>
 
         <div className="mt-6 border-t border-border pt-5 text-center text-sm">

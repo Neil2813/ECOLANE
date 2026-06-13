@@ -1,7 +1,9 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { User, Settings, Bell, ChevronRight, LogOut, Info, Sun, Moon } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { MobileShell } from "@/components/mobile-shell";
+import { getCachedUser, type AuthUser } from "@/lib/api/auth";
+import { logoutUser } from "@/lib/api/auth";
 
 export const Route = createFileRoute("/profile")({
   head: () => ({ meta: [{ title: "Profile · EcoLens" }] }),
@@ -13,6 +15,11 @@ function ProfilePage() {
   const [dark, setDark] = useState(true);
   const [pollutionAlerts, setPollutionAlerts] = useState(true);
   const [dailyReport, setDailyReport] = useState(true);
+  const [user, setUser] = useState<AuthUser | null>(null);
+
+  useEffect(() => {
+    setUser(getCachedUser());
+  }, []);
 
   const toggleTheme = () => {
     const next = !dark;
@@ -20,10 +27,20 @@ function ProfilePage() {
     document.documentElement.classList.toggle("light", !next);
   };
 
-  const signOut = () => {
-    localStorage.removeItem("ecolens:auth");
+  const signOut = async () => {
+    await logoutUser();
     navigate({ to: "/auth/signin" });
   };
+
+  // Display initials for the avatar
+  const initials = user?.name
+    ? user.name
+        .split(" ")
+        .slice(0, 2)
+        .map((w) => w[0])
+        .join("")
+        .toUpperCase()
+    : "JD";
 
   return (
     <MobileShell>
@@ -34,13 +51,13 @@ function ProfilePage() {
         <div className="mt-5 flex items-center gap-4 rounded-3xl border border-border bg-card p-5">
           <div className="relative">
             <div className="flex h-16 w-16 items-center justify-center rounded-full bg-eco-green/15 text-2xl font-bold text-eco-green">
-              JD
+              {initials}
             </div>
             <span className="absolute -bottom-0.5 -right-0.5 h-4 w-4 rounded-full border-2 border-card bg-eco-green" />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="font-semibold">Jane Doe</div>
-            <div className="truncate text-xs text-muted-foreground">jane@ecolens.net</div>
+            <div className="font-semibold">{user?.name ?? "Jane Doe"}</div>
+            <div className="truncate text-xs text-muted-foreground">{user?.email ?? "jane@ecolens.net"}</div>
             <div className="mt-1 inline-flex items-center gap-1.5 rounded-full bg-eco-orange/10 px-2 py-0.5 font-mono text-[10px] uppercase tracking-widest text-eco-orange">
               Pro tier
             </div>

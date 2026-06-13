@@ -1,9 +1,11 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ArrowLeft, Bike, Footprints, Car, SlidersHorizontal } from "lucide-react";
-import { useState } from "react";
+import { ArrowLeft, Bike, Footprints, Car, SlidersHorizontal, Loader2 } from "lucide-react";
+import { useState, useEffect } from "react";
 import { MobileShell } from "@/components/mobile-shell";
-import { trips } from "@/lib/mock-data";
+import { trips as mockTrips } from "@/lib/mock-data";
 import { cn } from "@/lib/utils";
+import { getTripHistory, type TripRecord } from "@/lib/api/trips";
+import { isDemo } from "@/lib/api/client";
 
 export const Route = createFileRoute("/dashboard/history")({
   head: () => ({ meta: [{ title: "Trip History · EcoLens" }] }),
@@ -12,8 +14,44 @@ export const Route = createFileRoute("/dashboard/history")({
 
 const filters = ["All", "This Week", "This Month"] as const;
 
+/** Map a backend TripRecord to the shape the UI expects */
+function mapTrip(t: TripRecord) {
+  const at = t.started_at ? new Date(t.started_at) : null;
+  const status: "safe" | "moderate" | "high" =
+    (t.ecoscore ?? 0) >= 70 ? "safe" : (t.ecoscore ?? 0) >= 45 ? "moderate" : "high";
+  return {
+    id: t.id,
+    date: at
+      ? at.toLocaleDateString("en-US", { month: "short", day: "numeric" })
+      : "—",
+    time: at
+      ? at.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
+      : "—",
+    name: `${t.route_type === "cleanest_air" ? "Cleanest Air" : t.route_type === "lowest_carbon" ? "Lowest Carbon" : "Fastest"} Route`,
+    mode: "bike" as "bike" | "walk" | "car",
+    duration: t.duration_min != null ? `${t.duration_min} min` : "—",
+    pm25Avoided: t.pm25_avoided ?? 0,
+    co2: t.co2_grams ?? 0,
+    ecoscore: t.ecoscore ?? 0,
+    status,
+  };
+}
+
 function HistoryPage() {
   const [active, setActive] = useState<(typeof filters)[number]>("All");
+  const [loading, setLoading] = useState(!isDemo());
+  const [trips, setTrips] = useState(mockTrips);
+
+  useEffect(() => {
+    if (isDemo()) return;
+    getTripHistory(1, active === "All" ? "all" : active === "This Week" ? "week" : "month")
+      .then((res) => {
+        if (res.trips.length > 0) setTrips(res.trips.map(mapTrip));
+      })
+      .catch((err) => console.warn("Trips API error, using mock:", err))
+      .finally(() => setLoading(false));
+  }, [active]);
+
 
   return (
     <MobileShell>
@@ -22,7 +60,10 @@ function HistoryPage() {
           <Link to="/dashboard" className="flex h-10 w-10 items-center justify-center rounded-full border border-border bg-card">
             <ArrowLeft className="h-4 w-4" />
           </Link>
-          <h1 className="text-xl font-bold">Trip History</h1>
+          <h1 className="flex items-center gap-2 text-xl font-bold">
+            Trip History
+            {loading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+          </h1>
         </div>
 
         <div className="mt-5 flex items-center justify-between gap-2">

@@ -1,7 +1,10 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { TrendingUp, AlertTriangle, ChevronRight, Bike, Shield, Trees, History, Award } from "lucide-react";
+import { TrendingUp, AlertTriangle, ChevronRight, Bike, Shield, Trees, History, Award, Loader2 } from "lucide-react";
 import { MobileShell } from "@/components/mobile-shell";
-import { todayExposure, ecoscoreTrend, weeklyPollution, forecast, badges } from "@/lib/mock-data";
+import { todayExposure as mockExposure, ecoscoreTrend as mockTrend, weeklyPollution as mockWeekly, forecast as mockForecast, badges as mockBadges } from "@/lib/mock-data";
+import { getDashboardSummary, type DashboardSummary } from "@/lib/api/dashboard";
+import { isDemo } from "@/lib/api/client";
+import { useState, useEffect } from "react";
 
 export const Route = createFileRoute("/dashboard")({
   head: () => ({ meta: [{ title: "Dashboard · EcoLens" }] }),
@@ -9,6 +12,40 @@ export const Route = createFileRoute("/dashboard")({
 });
 
 function DashboardPage() {
+  const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [loading, setLoading] = useState(!isDemo());
+
+  useEffect(() => {
+    if (isDemo()) return;
+    getDashboardSummary()
+      .then(setSummary)
+      .catch((err) => console.warn("Dashboard API error, using mock data:", err))
+      .finally(() => setLoading(false));
+  }, []);
+
+  // Merge API data over mock defaults so the UI always has values
+  const todayExposure = {
+    pm25: summary?.pm25_inhaled ?? mockExposure.pm25,
+    avoided: summary?.pm25_avoided ?? mockExposure.avoided,
+    co2: summary?.co2_grams ?? mockExposure.co2,
+    ecoscore: summary?.ecoscore ?? mockExposure.ecoscore,
+    no2: summary?.no2 ?? mockExposure.no2,
+    noise: summary?.noise ?? mockExposure.noise,
+    heatStress: summary?.heat_stress ?? mockExposure.heatStress,
+    cityAvgCo2: mockExposure.cityAvgCo2,
+  };
+  const ecoscoreTrend = summary?.ecoscore_trend ?? mockTrend;
+  const weeklyPollution = summary?.weekly_pollution ?? mockWeekly;
+  const forecast = summary?.forecast
+    ? {
+        risk: summary.forecast.risk,
+        pctHigher: summary.forecast.pct_higher,
+        departure: summary.forecast.departure,
+        route: summary.forecast.route,
+      }
+    : mockForecast;
+  const badges = summary?.badges ?? mockBadges;
+
   return (
     <MobileShell>
       <div className="px-5 pt-[max(1.25rem,env(safe-area-inset-top))]">
@@ -18,7 +55,10 @@ function DashboardPage() {
             <div className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
               Environmental Stewardship
             </div>
-            <h1 className="mt-1 text-2xl font-bold">Exposure Dashboard</h1>
+            <h1 className="mt-1 flex items-center gap-2 text-2xl font-bold">
+              Exposure Dashboard
+              {loading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+            </h1>
           </div>
           <span className="flex items-center gap-2 rounded-full border border-eco-green/40 bg-eco-green/10 px-3 py-1.5 font-mono text-[11px] uppercase tracking-widest text-eco-green">
             <span className="h-2 w-2 rounded-full bg-eco-green" />
