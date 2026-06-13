@@ -458,7 +458,7 @@ function MapPage() {
             <MapMarker longitude={userLocation[0]} latitude={userLocation[1]}>
               <MarkerContent>
                 <span className="relative flex h-6 w-6 items-center justify-center">
-                  <span className="absolute inset-0 rounded-full bg-eco-blue/20 pulse-ring" />
+                  <span className="absolute inset-0 rounded-full bg-eco-blue/20" />
                   <span className="h-3.5 w-3.5 rounded-full border-2 border-eco-cream bg-eco-blue shadow-md shadow-eco-blue/50" />
                 </span>
               </MarkerContent>
@@ -497,7 +497,7 @@ function MapPage() {
             <MapMarker longitude={currentNavCoords[0]} latitude={currentNavCoords[1]}>
               <MarkerContent>
                 <span className="relative flex h-8 w-8 items-center justify-center">
-                  <span className="absolute inset-0 rounded-full bg-eco-orange/30 pulse-ring" />
+                  <span className={`absolute inset-0 rounded-full bg-eco-orange/30 ${showSpikeAlert ? 'pulse-ring' : ''}`} />
                   <span className="flex h-5 w-5 items-center justify-center rounded-full border-2 border-background bg-eco-orange text-background shadow-md">
                     <Navigation className="h-3 w-3 fill-current" />
                   </span>
