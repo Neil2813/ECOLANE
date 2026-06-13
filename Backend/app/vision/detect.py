@@ -8,7 +8,7 @@ from app.services import detect_vision
 router = APIRouter()
 
 @router.post("/detect")
-def detect(payload: VisionDetectRequest, db: Session = Depends(get_db), user=Depends(get_current_user)):
+def detect(payload: VisionDetectRequest, db: Session = Depends(get_db)):
     try:
         result = detect_vision(payload.image_base64)
         if result.get("too_large"):
