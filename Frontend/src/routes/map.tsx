@@ -851,7 +851,6 @@ function MapPage() {
                 {/* Bottom info strip */}
                 <div className="absolute inset-x-4 bottom-3 z-10 flex items-center gap-3 rounded-2xl border border-border bg-card/85 px-4 py-3 backdrop-blur-md shadow-lg">
                   <span className="relative flex h-9 w-9 items-center justify-center rounded-full bg-eco-green/15">
-                    <span className="absolute inset-0 rounded-full pulse-ring" />
                     <Leaf className="h-5 w-5 text-eco-green" />
                   </span>
                   <div className="flex-1">
