@@ -73,6 +73,7 @@ function SignUpPage() {
               value={name}
               onChange={(e) => setName(e.target.value)}
               className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground text-foreground"
+              suppressHydrationWarning
             />
           </Field>
           <Field label="Email" icon={<Mail className="h-4 w-4" />}>
@@ -83,6 +84,7 @@ function SignUpPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground text-foreground"
+              suppressHydrationWarning
             />
           </Field>
           <Field label="Password" icon={<Lock className="h-4 w-4" />}>
@@ -93,14 +95,15 @@ function SignUpPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground text-foreground animate-none"
+              suppressHydrationWarning
             />
-            <button type="button" onClick={() => setShow(!show)} className="text-muted-foreground">
+            <button type="button" onClick={() => setShow(!show)} className="text-muted-foreground" suppressHydrationWarning>
               {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
             </button>
           </Field>
         </div>
 
-        <button type="submit" className="mt-6 w-full rounded-2xl bg-eco-orange py-3.5 text-base font-semibold text-background transition-transform active:scale-[0.98] glow-orange">
+        <button type="submit" className="mt-6 w-full rounded-2xl bg-eco-orange py-3.5 text-base font-semibold text-background transition-transform active:scale-[0.98] glow-orange" suppressHydrationWarning>
           Create Account
         </button>
 

@@ -62,6 +62,7 @@ function SignInPage() {
               onChange={(e) => setEmail(e.target.value)}
               placeholder="operator@ecolens.net"
               className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+              suppressHydrationWarning
             />
           </Field>
 
@@ -82,11 +83,13 @@ function SignInPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
                 className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                suppressHydrationWarning
               />
               <button
                 type="button"
                 onClick={() => setShow(!show)}
                 className="text-muted-foreground hover:text-foreground"
+                suppressHydrationWarning
               >
                 {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
@@ -104,6 +107,7 @@ function SignInPage() {
           type="submit"
           disabled={loading}
           className="mt-6 flex w-full items-center justify-center gap-2 rounded-2xl bg-eco-orange py-3.5 text-base font-semibold text-background transition-transform active:scale-[0.98] disabled:opacity-60"
+          suppressHydrationWarning
         >
           {loading ? (
             <><Loader2 className="h-4 w-4 animate-spin" /> Signing in…</>

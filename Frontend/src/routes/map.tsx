@@ -651,6 +651,7 @@ function MapPage() {
                   <input
                     type="text"
                     value={destText}
+                    onChange={(e) => setDestText(e.target.value)}
                     onFocus={() => {
                       setIsDirectionsExpanded(true);
                       setShowDestSuggestions(true);
