@@ -1,7 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.db.session import get_db
-from app.utils.auth_dep import get_current_user
 from app.schemas.vision import VisionDetectRequest
 from app.services import detect_vision
 
