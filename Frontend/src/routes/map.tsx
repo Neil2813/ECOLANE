@@ -87,6 +87,7 @@ function MapPage() {
   const [showOriginSuggestions, setShowOriginSuggestions] = useState(false);
   const [showDestSuggestions, setShowDestSuggestions] = useState(false);
   const [isRoutingMode, setIsRoutingMode] = useState(false);
+  const [isDirectionsExpanded, setIsDirectionsExpanded] = useState(false);
 
   // Dynamic suggestions states
   const [originSuggestions, setOriginSuggestions] = useState<LocationSuggestion[]>([]);
@@ -240,6 +241,7 @@ function MapPage() {
       setDestCoords(item.coords);
       setShowDestSuggestions(false);
       setIsRoutingMode(true);
+      setIsDirectionsExpanded(true);
       mapRef.current?.flyTo({ center: item.coords, zoom: 13, duration: 1200 });
     }
   };
@@ -479,126 +481,181 @@ function MapPage() {
           <>
             {/* Top search & directions panel */}
             <div className="absolute inset-x-0 top-0 z-20 px-4 pt-[max(1rem,env(safe-area-inset-top))]">
-              <div className="rounded-3xl border border-border bg-card/80 p-4 shadow-xl backdrop-blur-md">
-                {/* Mode controls: Direct address inputs */}
-                <div className="flex flex-col gap-3">
-                  <div className="relative flex items-center gap-2">
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-eco-green/10 text-eco-green">
-                      <Compass className="h-4 w-4" />
-                    </span>
-                    <input
-                      type="text"
-                      value={originText}
-                      onFocus={() => {
-                        setShowOriginSuggestions(true);
-                        setShowDestSuggestions(false);
-                      }}
-                      onBlur={() => {
-                        setTimeout(() => setShowOriginSuggestions(false), 250);
-                      }}
-                      onChange={(e) => {
-                        setOriginText(e.target.value);
-                        setShowOriginSuggestions(true);
-                      }}
-                      placeholder="Enter start location..."
-                      className="flex-1 bg-transparent text-sm text-foreground outline-none border-b border-border py-1"
-                    />
-                    <X
-                      className="h-4 w-4 cursor-pointer text-muted-foreground hover:text-foreground"
-                      onClick={() => {
-                        setOriginText("");
-                        setOriginCoords(null);
-                      }}
-                    />
-                  </div>
-
-                  <div className="relative flex items-center gap-2">
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-eco-red/10 text-eco-red">
-                      <MapPin className="h-4 w-4" />
-                    </span>
-                    <input
-                      type="text"
-                      value={destText}
-                      onFocus={() => {
-                        setShowDestSuggestions(true);
-                        setShowOriginSuggestions(false);
-                      }}
-                      onBlur={() => {
-                        setTimeout(() => setShowDestSuggestions(false), 250);
-                      }}
-                      onChange={(e) => {
-                        setDestText(e.target.value);
-                        setShowDestSuggestions(true);
-                      }}
-                      placeholder="Search destination..."
-                      className="flex-1 bg-transparent text-sm text-foreground outline-none border-b border-border py-1"
-                    />
-                    <X
-                      className="h-4 w-4 cursor-pointer text-muted-foreground hover:text-foreground"
+              {!isDirectionsExpanded ? (
+                /* SINGLE SEARCH BAR MODE */
+                <div className="flex items-center gap-3 rounded-full border border-border bg-card/85 px-4 py-3 shadow-lg backdrop-blur-md">
+                  <Search className="h-4 w-4 text-eco-orange ml-1" />
+                  <input
+                    type="text"
+                    value={destText}
+                    onFocus={() => {
+                      setIsDirectionsExpanded(true);
+                      setShowDestSuggestions(true);
+                    }}
+                    placeholder="Where are you going?"
+                    className="flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
+                  />
+                  {destText && (
+                    <button
                       onClick={() => {
                         setDestText("");
                         setDestCoords(null);
                         setIsRoutingMode(false);
                       }}
-                    />
-                  </div>
+                      className="text-muted-foreground hover:text-foreground"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  )}
+                  <div className="h-5 w-[1px] bg-border/80" />
+                  <button
+                    onClick={() => {
+                      setIsDirectionsExpanded(true);
+                    }}
+                    className="p-1 text-eco-orange hover:text-eco-orange/80 transition-colors"
+                  >
+                    <Navigation className="h-4 w-4 fill-current rotate-45" />
+                  </button>
                 </div>
-
-                {/* Swap button helper */}
-                {isRoutingMode && (
-                  <div className="mt-2 flex justify-end">
+              ) : (
+                /* EXPANDED DIRECTIONS MODE (TWO INPUTS) */
+                <div className="rounded-3xl border border-border bg-card/85 p-4 shadow-xl backdrop-blur-md flex flex-col gap-3">
+                  <div className="flex items-center gap-2 border-b border-border/50 pb-2">
                     <button
                       onClick={() => {
-                        const tempText = originText;
-                        const tempCoords = originCoords;
-                        setOriginText(destText);
-                        setOriginCoords(destCoords);
-                        setDestText(tempText);
-                        setDestCoords(tempCoords as [number, number]);
+                        setIsDirectionsExpanded(false);
+                        setIsRoutingMode(false);
+                        setDestCoords(null);
+                        setDestText("");
                       }}
-                      className="flex items-center gap-1 font-mono text-[10px] text-eco-orange hover:underline"
+                      className="p-1 hover:bg-muted rounded-full text-muted-foreground hover:text-foreground transition-colors"
                     >
-                      <RefreshCw className="h-3 w-3" /> Swap Locations
+                      <ArrowLeft className="h-4 w-4" />
                     </button>
+                    <span className="font-semibold text-xs text-foreground font-mono">Plan EcoRoute</span>
                   </div>
-                )}
 
-                {/* Suggestion Dropdown: Start / Origin */}
-                {showOriginSuggestions && originText.trim().length >= 2 && originText !== "My Location" && (
-                  <div className="mt-3 max-h-48 overflow-y-auto rounded-xl border border-border bg-background/95 p-2 shadow-inner pointer-events-auto">
-                    {loadingOrigin && <div className="px-3 py-2 text-xs text-muted-foreground">Searching...</div>}
-                    {!loadingOrigin && originSuggestions.length === 0 && <div className="px-3 py-2 text-xs text-muted-foreground font-mono">No matching locations found</div>}
-                    {originSuggestions.map((item, idx) => (
-                      <button
-                        key={"origin-" + idx}
-                        onClick={() => selectSuggestion("origin", item)}
-                        className="flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left text-xs hover:bg-card text-foreground"
-                      >
-                        <MapPin className="h-3.5 w-3.5 text-muted-foreground" />
-                        <span className="truncate">{item.name}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
+                  <div className="flex flex-col gap-3">
+                    {/* Origin input */}
+                    <div className="relative flex items-center gap-2">
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-eco-green/10 text-eco-green">
+                        <Compass className="h-4 w-4" />
+                      </span>
+                      <input
+                        type="text"
+                        value={originText}
+                        onFocus={() => {
+                          setShowOriginSuggestions(true);
+                          setShowDestSuggestions(false);
+                        }}
+                        onBlur={() => {
+                          setTimeout(() => setShowOriginSuggestions(false), 250);
+                        }}
+                        onChange={(e) => {
+                          setOriginText(e.target.value);
+                          setShowOriginSuggestions(true);
+                        }}
+                        placeholder="Enter start location..."
+                        className="flex-1 bg-transparent text-sm text-foreground outline-none border-b border-border py-1"
+                      />
+                      <X
+                        className="h-4 w-4 cursor-pointer text-muted-foreground hover:text-foreground"
+                        onClick={() => {
+                          setOriginText("");
+                          setOriginCoords(null);
+                        }}
+                      />
+                    </div>
 
-                {/* Suggestion Dropdown: Destination */}
-                {showDestSuggestions && destText.trim().length >= 2 && (
-                  <div className="mt-3 max-h-48 overflow-y-auto rounded-xl border border-border bg-background/95 p-2 shadow-inner pointer-events-auto">
-                    {loadingDest && <div className="px-3 py-2 text-xs text-muted-foreground">Searching...</div>}
-                    {!loadingDest && destSuggestions.length === 0 && <div className="px-3 py-2 text-xs text-muted-foreground font-mono">No matching locations found</div>}
-                    {destSuggestions.map((item, idx) => (
-                      <button
-                        key={"dest-" + idx}
-                        onClick={() => selectSuggestion("dest", item)}
-                        className="flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left text-xs hover:bg-card text-foreground"
-                      >
-                        <MapPin className="h-3.5 w-3.5 text-eco-red" />
-                        <span className="truncate">{item.name}</span>
-                      </button>
-                    ))}
+                    {/* Destination input */}
+                    <div className="relative flex items-center gap-2">
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-eco-red/10 text-eco-red">
+                        <MapPin className="h-4 w-4" />
+                      </span>
+                      <input
+                        type="text"
+                        value={destText}
+                        onFocus={() => {
+                          setShowDestSuggestions(true);
+                          setShowOriginSuggestions(false);
+                        }}
+                        onBlur={() => {
+                          setTimeout(() => setShowDestSuggestions(false), 250);
+                        }}
+                        onChange={(e) => {
+                          setDestText(e.target.value);
+                          setShowDestSuggestions(true);
+                        }}
+                        placeholder="Search destination..."
+                        className="flex-1 bg-transparent text-sm text-foreground outline-none border-b border-border py-1"
+                      />
+                      <X
+                        className="h-4 w-4 cursor-pointer text-muted-foreground hover:text-foreground"
+                        onClick={() => {
+                          setDestText("");
+                          setDestCoords(null);
+                          setIsRoutingMode(false);
+                        }}
+                      />
+                    </div>
                   </div>
-                )}
-              </div>
+
+                  {/* Swap button helper */}
+                  {isRoutingMode && (
+                    <div className="mt-1 flex justify-end">
+                      <button
+                        onClick={() => {
+                          const tempText = originText;
+                          const tempCoords = originCoords;
+                          setOriginText(destText);
+                          setOriginCoords(destCoords);
+                          setDestText(tempText);
+                          setDestCoords(tempCoords as [number, number]);
+                        }}
+                        className="flex items-center gap-1 font-mono text-[10px] text-eco-orange hover:underline"
+                      >
+                        <RefreshCw className="h-3 w-3" /> Swap Locations
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Suggestion Dropdown: Start / Origin */}
+                  {showOriginSuggestions && originText.trim().length >= 2 && originText !== "My Location" && (
+                    <div className="mt-1 max-h-48 overflow-y-auto rounded-xl border border-border bg-background/95 p-2 shadow-inner pointer-events-auto">
+                      {loadingOrigin && <div className="px-3 py-2 text-xs text-muted-foreground">Searching...</div>}
+                      {!loadingOrigin && originSuggestions.length === 0 && <div className="px-3 py-2 text-xs text-muted-foreground font-mono">No matching locations found</div>}
+                      {originSuggestions.map((item, idx) => (
+                        <button
+                          key={"origin-" + idx}
+                          onClick={() => selectSuggestion("origin", item)}
+                          className="flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left text-xs hover:bg-card text-foreground"
+                        >
+                          <MapPin className="h-3.5 w-3.5 text-muted-foreground" />
+                          <span className="truncate">{item.name}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Suggestion Dropdown: Destination */}
+                  {showDestSuggestions && destText.trim().length >= 2 && (
+                    <div className="mt-1 max-h-48 overflow-y-auto rounded-xl border border-border bg-background/95 p-2 shadow-inner pointer-events-auto">
+                      {loadingDest && <div className="px-3 py-2 text-xs text-muted-foreground">Searching...</div>}
+                      {!loadingDest && destSuggestions.length === 0 && <div className="px-3 py-2 text-xs text-muted-foreground font-mono">No matching locations found</div>}
+                      {destSuggestions.map((item, idx) => (
+                        <button
+                          key={"dest-" + idx}
+                          onClick={() => selectSuggestion("dest", item)}
+                          className="flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left text-xs hover:bg-card text-foreground"
+                        >
+                          <MapPin className="h-3.5 w-3.5 text-eco-red" />
+                          <span className="truncate">{item.name}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Quick Floating Map Utilities */}
