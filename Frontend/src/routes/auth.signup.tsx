@@ -42,17 +42,17 @@ function SignUpPage() {
         localStorage.setItem("ecolens:auth", "1");
         localStorage.setItem("ecolens:auth_token", data.token);
         localStorage.setItem("ecolens:user", JSON.stringify(data.user));
-        navigate({ to: "/map" });
+        navigate({ to: "/onboarding/$step", params: { step: "1" } });
       } else {
         const data = await response.json();
         console.warn("Backend signup failed, falling back to demo:", data.detail);
         localStorage.setItem("ecolens:auth", "demo");
-        navigate({ to: "/map" });
+        navigate({ to: "/onboarding/$step", params: { step: "1" } });
       }
     } catch (err) {
       console.warn("Backend offline. Fallback to local demo mode:", err);
       localStorage.setItem("ecolens:auth", "demo");
-      navigate({ to: "/map" });
+      navigate({ to: "/onboarding/$step", params: { step: "1" } });
     }
   };
 

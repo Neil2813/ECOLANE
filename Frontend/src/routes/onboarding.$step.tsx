@@ -95,7 +95,7 @@ function OnboardingPage() {
         localStorage.removeItem("ecolens:commute_destination");
         localStorage.removeItem("ecolens:commute_destination_coords");
       }
-      navigate({ to: "/auth/signup" });
+      navigate({ to: "/map" });
     }
   };
 
@@ -104,7 +104,7 @@ function OnboardingPage() {
     localStorage.setItem("ecolens:use_everyday", "false");
     localStorage.removeItem("ecolens:commute_destination");
     localStorage.removeItem("ecolens:commute_destination_coords");
-    navigate({ to: "/auth/signup" });
+    navigate({ to: "/map" });
   };
 
   return (
@@ -270,14 +270,6 @@ function OnboardingPage() {
             </button>
           </div>
 
-          {idx < 3 && (
-            <Link
-              to="/auth/signin"
-              className="mt-5 block text-center text-xs text-muted-foreground hover:text-foreground"
-            >
-              Already have an account? Sign in
-            </Link>
-          )}
         </div>
       </div>
     </div>
