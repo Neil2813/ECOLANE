@@ -575,7 +575,7 @@ function ARPage() {
 
                 <div className="flex flex-col gap-2.5">
                   <div className="flex items-center justify-between">
-                    <span className="text-sm font-semibold truncate max-w-[180px] text-eco-cream">
+                    <span className="text-sm font-semibold truncate max-w-[180px] text-foreground">
                       To: {navState.destText || "Selected Destination"}
                     </span>
                     <span className="rounded-full bg-eco-green/10 px-2 py-0.5 font-mono text-[9px] font-bold text-eco-green">
