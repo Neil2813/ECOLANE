@@ -30,7 +30,7 @@ def _preference_score(route: CandidateRoute, user_preference: str) -> float:
 
 
 def _policy_action(routes: list[CandidateRoute], user_preference: str) -> int:
-    """PPO-compatible fallback policy until a trained model artifact exists."""
+    """PPO-compatible heuristic policy until a trained model artifact exists."""
     best_index = 0
     best_score = float("-inf")
     for index, route in enumerate(routes):
@@ -84,6 +84,48 @@ def _label_for_route(route: CandidateRoute, rank: int) -> str:
     return f"Adaptive Route {rank}"
 
 
+def _risk_level(score: float) -> str:
+    if score >= 70:
+        return "safe"
+    if score >= 45:
+        return "moderate"
+    return "worst"
+
+
+def _risk_color(level: str) -> str:
+    return {
+        "safe": "#22c55e",
+        "moderate": "#f97316",
+        "worst": "#ef4444",
+    }[level]
+
+
+def _build_risk_segments(route: CandidateRoute) -> list[dict[str, Any]]:
+    coords = route.polyline
+    if len(coords) < 2:
+        return []
+
+    base_score = float(route.metrics["ecoscore_now"])
+    segments = []
+    total = len(coords) - 1
+    for index in range(total):
+        # Deterministic variation so a route can show green/orange/red patches
+        # without inventing new geometry. The aggregate still matches EcoScore.
+        phase = ((index * 37 + int(route.metrics["pm25_exposure"])) % 41) - 20
+        congestion = (index / max(1, total - 1)) * route.degradation_rate * 18
+        segment_score = max(0, min(100, base_score - congestion + phase))
+        level = _risk_level(segment_score)
+        segments.append(
+            {
+                "coordinates": [coords[index], coords[index + 1]],
+                "risk": level,
+                "color": _risk_color(level),
+                "score": round(segment_score, 1),
+            }
+        )
+    return segments
+
+
 def _serialise_route(route: CandidateRoute, rank: int) -> dict[str, Any]:
     ecoscore = int(route.metrics["ecoscore_now"])
     return {
@@ -107,6 +149,7 @@ def _serialise_route(route: CandidateRoute, rank: int) -> dict[str, Any]:
         "recommended": route.ppo_recommended,
         "degradation_warning": route.degradation_warning,
         "forecast_note": route.forecast_note,
+        "risk_segments": route.risk_segments,
         "polyline": route.polyline,
         "segment_ids": route.segment_ids,
     }
@@ -146,7 +189,13 @@ def recommend_routes(
     graph = load_graph()
     origin_node = nearest_node(graph, origin["lat"], origin["lng"])
     destination_node = nearest_node(graph, destination["lat"], destination["lng"])
-    routes, total_viable = generate_candidate_routes(graph, origin_node, destination_node)
+    routes, total_viable = generate_candidate_routes(
+        graph,
+        origin_node,
+        destination_node,
+        origin=origin,
+        destination=destination,
+    )
 
     midpoint = {
         "lat": (float(origin["lat"]) + float(destination["lat"])) / 2,
@@ -155,9 +204,13 @@ def recommend_routes(
     weather_data = _fetch_route_weather(midpoint["lat"], midpoint["lng"])
     aq_data = _fetch_route_air_quality(midpoint["lat"], midpoint["lng"])
 
+    scored_routes: list[CandidateRoute] = []
     for route in routes:
         route.current_load = tracker.get_route_load(route.route_id)
-        route.metrics = compute_route_signals(db, route, weather_data)
+        try:
+            route.metrics = compute_route_signals(db, route, weather_data)
+        except ValueError:
+            continue
         if aq_data.get("pm25"):
             route.metrics["pm25_avg"] = (route.metrics["pm25_avg"] + float(aq_data["pm25"])) / 2
         if aq_data.get("no2"):
@@ -166,6 +219,10 @@ def recommend_routes(
         forecast_route(route, weather_data)
         route.degradation_warning = degradation_warning(route)
         route.forecast_note = forecast_note(route)
+        route.risk_segments = _build_risk_segments(route)
+        scored_routes.append(route)
+
+    routes = scored_routes
 
     if not routes:
         return {

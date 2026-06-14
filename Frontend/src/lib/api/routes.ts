@@ -20,6 +20,12 @@ export interface RouteOption {
   ppo_recommended?: boolean;
   degradation_warning?: string | null;
   forecast_note?: string | null;
+  risk_segments?: {
+    coordinates: [number, number][];
+    risk: "safe" | "moderate" | "worst";
+    color: string;
+    score: number;
+  }[];
   /** Array of [lng, lat] coordinate pairs forming the route polyline */
   polyline: [number, number][];
   segment_ids: string[];

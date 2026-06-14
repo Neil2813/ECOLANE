@@ -43,11 +43,12 @@ function DashboardPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  // Derived values — only from API (zeros when no data yet)
-  const pm25 = summary?.pm25_inhaled ?? 0;
-  const avoided = summary?.pm25_avoided ?? 0;
-  const co2 = summary?.co2_grams ?? 0;
-  const ecoscore = summary?.ecoscore ?? 0;
+  // Derived values — only from API, null when no data
+  const hasData = summary != null && (summary.pm25_inhaled > 0 || summary.pm25_avoided > 0 || summary.co2_grams > 0 || summary.ecoscore > 0);
+  const pm25 = summary?.pm25_inhaled ?? null;
+  const avoided = summary?.pm25_avoided ?? null;
+  const co2 = summary?.co2_grams ?? null;
+  const ecoscore = summary?.ecoscore ?? null;
   const co2VsAvg = summary?.co2_vs_avg_percent;
   const ecoscoreDelta = summary?.ecoscore_delta;
   const ecoscoreTrend = summary?.ecoscore_trend ?? [];
@@ -56,7 +57,7 @@ function DashboardPage() {
   const badges = summary?.badges ?? [];
 
   // Ring fill: scale ecoscore (0-100) to ring fill percent
-  const ringPercent = ecoscore;
+  const ringPercent = ecoscore ?? 0;
 
   return (
     <MobileShell>
@@ -102,17 +103,17 @@ function DashboardPage() {
                 <Shield className="h-3.5 w-3.5 shrink-0" />
                 {loading ? (
                   <SkeletonLine w="w-40" />
+                ) : avoided != null && avoided > 0 ? (
+                  <span>Avoided <b>{avoided.toFixed(1)} µg</b> via EcoLens route</span>
                 ) : (
-                  <span>
-                    Avoided <b>{avoided.toFixed(1)} µg</b> via EcoLens route
-                  </span>
+                  <span className="text-muted-foreground">No trips recorded yet</span>
                 )}
               </div>
 
               <div className="mt-2 inline-flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 font-mono text-[11px] text-muted-foreground">
                 {loading ? (
                   <SkeletonLine w="w-32" />
-                ) : (
+                ) : co2 != null && co2 > 0 ? (
                   <>
                     CO₂ {co2.toFixed(1)}g
                     {co2VsAvg != null && (
@@ -124,6 +125,8 @@ function DashboardPage() {
                       </>
                     )}
                   </>
+                ) : (
+                  <span>CO₂ &mdash;</span>
                 )}
               </div>
             </div>
@@ -131,7 +134,7 @@ function DashboardPage() {
             {/* EcoScore ring */}
             <CircularProgress
               value={ringPercent}
-              label={loading ? "–" : `${pm25.toFixed(0)}`}
+              label={loading ? "–" : pm25 != null ? `${pm25.toFixed(0)}` : "–"}
               sublabel="µg PM2.5"
             />
           </div>
@@ -247,7 +250,7 @@ function DashboardPage() {
               </div>
               <div className="text-right">
                 <div className="text-3xl font-bold text-eco-green">
-                  {loading ? "–" : ecoscore}
+                  {loading ? "–" : ecoscore != null && ecoscore > 0 ? ecoscore : "–"}
                 </div>
                 <div className="font-mono text-[10px] text-muted-foreground">/ 100</div>
               </div>

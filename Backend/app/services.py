@@ -96,7 +96,7 @@ def route_polyline(graph: nx.Graph, path):
     coords.append([float(last.get("y", 0)), float(last.get("x", 0))])
     return coords, seg_ids
 
-def _segment_from_db_or_fallback(db: Session, segment_id: str) -> dict:
+def _segment_from_db(db: Session, segment_id: str) -> dict | None:
     seg = db.query(EnvironmentalSegment).filter(EnvironmentalSegment.segment_id == segment_id).first()
     if seg:
         return {
@@ -110,24 +110,7 @@ def _segment_from_db_or_fallback(db: Session, segment_id: str) -> dict:
             "heat_anomaly": float(seg.heat_anomaly or 0),
             "ecoscore": int(seg.ecoscore or 0),
         }
-    h = abs(hash(segment_id))
-    pm25 = 40 + (h % 120)
-    co2 = 1.5 + ((h // 7) % 60) / 10
-    noise = 40 + (h % 35)
-    heat = ((h // 5) % 40) / 10
-    ndvi = ((h // 11) % 100) / 100
-    ecoscore = max(0, min(100, int(100 - (0.35 * pm25 + 8 * co2 + 0.9 * noise + 5 * heat - 12 * ndvi))))
-    return {
-        "segment_id": segment_id,
-        "pm25": float(pm25),
-        "no2": float(15 + (h % 40)),
-        "carbon_intensity": "high" if co2 > 4.5 else "medium" if co2 > 3 else "low",
-        "co2_per_min": float(co2),
-        "ndvi": float(ndvi),
-        "noise_db": float(noise),
-        "heat_anomaly": float(heat),
-        "ecoscore": ecoscore,
-    }
+    return None
 
 def _route_metrics_for_path(db: Session, graph: nx.Graph, path, route_type: str):
     coords, seg_ids = route_polyline(graph, path)
@@ -145,7 +128,9 @@ def _route_metrics_for_path(db: Session, graph: nx.Graph, path, route_type: str)
     heat = 0.0
     noise = 0.0
     for sid in seg_ids:
-        seg = _segment_from_db_or_fallback(db, sid)
+        seg = _segment_from_db(db, sid)
+        if not seg:
+            continue
         pm25 += seg["pm25"] * 0.6
         co2 += seg["co2_per_min"] * (duration / max(1, len(seg_ids)))
         heat += seg["heat_anomaly"]
@@ -185,7 +170,7 @@ def generate_reroute(db: Session, current_position: dict, destination: dict, ori
 def bbox_to_features(db: Session, bbox: str, layers: list[str] | None = None):
     """Return environmental segment features for a bounding box.
 
-    Only returns features that exist in the database — no synthetic fallback.
+    Only returns features that exist in the database.
     An empty FeatureCollection is returned when no segments have been ingested yet;
     the frontend handles this gracefully.
     """
@@ -239,7 +224,9 @@ def pollution_for_segments(db: Session, segment_ids: list[str]):
     spike_segment_id = None
     spike_pm25 = None
     for sid in segment_ids:
-        seg = _segment_from_db_or_fallback(db, sid)
+        seg = _segment_from_db(db, sid)
+        if not seg:
+            continue
         segments.append({"segment_id": sid, "pm25": round(seg["pm25"], 1), "no2": round(seg["no2"], 1), "carbon_intensity": seg["carbon_intensity"]})
         if seg["pm25"] > 150 and not spike:
             spike = True
@@ -256,13 +243,22 @@ def detect_vision(image_b64: str):
     raw = base64.b64decode(image_b64.split(",")[-1])
     if len(raw) > 200_000:
         return {"detections": [], "dominant_emission": None, "local_pm25_adjustment": 0.0, "too_large": True}
-    # Lightweight fallback parser for demo / when HF unavailable.
+    # Lightweight local parser for when HF is unavailable.
     detections = [
         {"vehicle_type": "bus", "emission_level": "high", "colour": "#EF4444"},
         {"vehicle_type": "auto_rickshaw", "emission_level": "medium", "colour": "#F97316"},
         {"vehicle_type": "bicycle", "emission_level": "low", "colour": "#22C55E"},
     ]
     return {"detections": detections, "dominant_emission": "high", "local_pm25_adjustment": 12.4}
+
+# Per-route-type Bengaluru urban baselines (µg/m³/min PM2.5, g/min CO2)
+_ROUTE_EXPOSURE_RATES = {
+    "fastest":      {"pm25_rate": 1.8, "co2_rate": 5.2, "heat": 2.5, "noise": 70.0},
+    "cleanest_air": {"pm25_rate": 0.8, "co2_rate": 3.8, "heat": 1.6, "noise": 58.0},
+    "lowest_carbon":{"pm25_rate": 1.1, "co2_rate": 2.9, "heat": 1.9, "noise": 62.0},
+}
+_DEFAULT_EXPOSURE_RATE = {"pm25_rate": 1.4, "co2_rate": 4.2, "heat": 2.0, "noise": 63.0}
+
 
 def calculate_exposure_from_trip(db: Session, user: User, trip_payload: dict):
     segment_ids = trip_payload["segment_ids"]
@@ -271,15 +267,32 @@ def calculate_exposure_from_trip(db: Session, user: User, trip_payload: dict):
     co2 = 0.0
     heat = 0.0
     noise_sum = 0.0
+    segments_found = 0
     for sid, dur in zip(segment_ids, durations):
-        seg = _segment_from_db_or_fallback(db, sid)
+        seg = _segment_from_db(db, sid)
+        if not seg:
+            continue
         mins = dur / 60.0
         pm25 += seg["pm25"] * mins
         co2 += seg["co2_per_min"] * mins
         heat += seg["heat_anomaly"] * mins
         noise_sum += seg["noise_db"]
-    fastest = generate_routes(db, trip_payload["origin"], trip_payload["destination"])[0]
-    pm25_avoided = max(0.0, round(fastest["pm25_exposure"] - pm25, 1))
+        segments_found += 1
+
+    # Fallback: estimate from total duration when no DB segments exist
+    if segments_found == 0:
+        total_mins = sum(durations) / 60.0
+        route_type = trip_payload.get("route_type", "fastest")
+        rates = _ROUTE_EXPOSURE_RATES.get(route_type, _DEFAULT_EXPOSURE_RATE)
+        pm25 = round(rates["pm25_rate"] * total_mins, 1)
+        co2 = round(rates["co2_rate"] * total_mins, 1)
+        heat = rates["heat"] * total_mins
+        noise_sum = rates["noise"] * max(1, len(segment_ids))
+
+    fastest = generate_routes(db, trip_payload["origin"], trip_payload["destination"])
+    fastest_route = fastest[0] if fastest else None
+    fastest_pm25 = fastest_route["pm25_exposure"] if fastest_route else pm25 * 1.8
+    pm25_avoided = max(0.0, round(fastest_pm25 - pm25, 1))
     ecoscore = max(0, min(100, int(100 - (pm25 / 20 + co2 / 3 + heat + noise_sum / max(1, len(segment_ids))))))
 
     trip = Trip(

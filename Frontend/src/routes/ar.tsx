@@ -3,39 +3,6 @@ import { ArrowLeft, Map, AlertTriangle, Leaf, Camera, Navigation, MapPin, CheckC
 import { MobileShell } from "@/components/mobile-shell";
 import { useState, useEffect, useRef } from "react";
 
-// Generate intermediate coordinates for simulated paths
-function generateRoutePoints(
-  start: [number, number],
-  end: [number, number],
-  type: string
-): [number, number][] {
-  const steps = 12;
-  const pts: [number, number][] = [];
-  for (let i = 0; i <= steps; i++) {
-    const t = i / steps;
-    let lng = start[0] + (end[0] - start[0]) * t;
-    let lat = start[1] + (end[1] - start[1]) * t;
-
-    // Bow coordinates to differentiate paths
-    if (i > 0 && i < steps) {
-      const curveOffset = Math.sin(t * Math.PI);
-      if (type === "cleanest_air") {
-        lng += (end[1] - start[1]) * 0.18 * curveOffset;
-        lat -= (end[0] - start[0]) * 0.18 * curveOffset;
-      } else if (type === "lowest_carbon") {
-        lng -= (end[1] - start[1]) * 0.12 * curveOffset;
-        lat += (end[0] - start[0]) * 0.12 * curveOffset;
-      } else {
-        // Fastest has minor zig-zag offsets
-        lng += Math.sin(i) * 0.0015 * curveOffset;
-        lat += Math.cos(i) * 0.0015 * curveOffset;
-      }
-    }
-    pts.push([lng, lat]);
-  }
-  return pts;
-}
-
 // Helper for dynamic turn-by-turn directions based on progress
 function getDirectionsInstruction(progress: number, pathLength: number) {
   if (pathLength === 0) return { text: "Proceed to destination", type: "straight" };
@@ -80,16 +47,17 @@ function ARPage() {
   const [isScanning, setIsScanning] = useState(false);
   const [coords, setCoords] = useState<{ lat: number; lng: number }>({ lat: 12.9716, lng: 77.5946 });
 
-  // Synchronously load saved navigation state on initialization
-  const [navState, setNavState] = useState<any>(() => {
-    if (typeof window === "undefined") return null;
+  // Synchronously load saved navigation state on initialization (client-only)
+  const [navState, setNavState] = useState<any>(null);
+
+  useEffect(() => {
     try {
       const saved = localStorage.getItem("ecolens:navigation_state");
-      return saved ? JSON.parse(saved) : null;
+      if (saved) setNavState(JSON.parse(saved));
     } catch {
-      return null;
+      // ignore
     }
-  });
+  }, []);
 
   // Dynamic HUD stats
   const [hudStats, setHudStats] = useState({
@@ -178,10 +146,8 @@ function ARPage() {
   };
 
   const startNav = () => {
-    if (!navState || !navState.destCoords) return;
-    const startPt = navState.originCoords || [coords.lng, coords.lat];
-    const endPt = navState.destCoords;
-    const selectedPath = generateRoutePoints(startPt, endPt, navState.routeType || "cleanest_air");
+    if (!navState || !Array.isArray(navState.navPath)) return;
+    const selectedPath = navState.navPath;
 
     if (selectedPath.length === 0) return;
 
@@ -253,61 +219,6 @@ function ARPage() {
     return canvas.toDataURL("image/jpeg", 0.7);
   };
 
-  // Local simulation fallback
-  const runSimulation = () => {
-    const vehicleTypes = ["Bus", "Auto Rickshaw", "Motorcycle", "Car", "Bicycle"];
-    const emissionLevels = ["high", "medium", "low"];
-    const colors = { high: "#EF4444", medium: "#F97316", low: "#22C55E" };
-
-    const count = 1 + Math.floor(Math.random() * 2);
-    const mockDetections: Detection[] = [];
-    let dominant = "low";
-    let adjustment = 0;
-
-    for (let i = 0; i < count; i++) {
-      const type = vehicleTypes[Math.floor(Math.random() * vehicleTypes.length)];
-      const emission = emissionLevels[Math.floor(Math.random() * emissionLevels.length)];
-      
-      if (emission === "high") {
-        dominant = "high";
-        adjustment += 15 + Math.random() * 10;
-      } else if (emission === "medium" && dominant !== "high") {
-        dominant = "medium";
-        adjustment += 6 + Math.random() * 6;
-      } else if (emission === "low" && dominant === "low") {
-        adjustment += 1 + Math.random() * 2;
-      }
-      
-      mockDetections.push({
-        id: `${Date.now()}-${i}`,
-        type: type,
-        emission: emission,
-        color: colors[emission as keyof typeof colors],
-        x: 20 + Math.random() * 60,
-        y: 35 + Math.random() * 30,
-        timestamp: Date.now(),
-      });
-    }
-
-    const pm25Val = Math.round(36 + adjustment);
-    const aqiVal = Math.round(pm25Val * 1.5);
-    const co2Level = dominant === "high" ? "High" : dominant === "medium" ? "Medium" : "Normal";
-    const co2Color = co2Level === "High" ? "text-eco-orange" : co2Level === "Medium" ? "text-eco-blue" : "text-eco-green";
-
-    setHudStats({
-      aqi: aqiVal,
-      pm25: pm25Val,
-      co2: co2Level,
-      co2Tone: co2Color,
-    });
-
-    setDetections((prev) => {
-      const now = Date.now();
-      const active = prev.filter((d) => now - d.timestamp < 3000);
-      return [...active, ...mockDetections];
-    });
-  };
-
   // Periodic frame scanning hook
   useEffect(() => {
     if (permissionState !== "granted" || !videoStream) return;
@@ -370,8 +281,7 @@ function ARPage() {
           return [...active, ...newDetections];
         });
       } catch (err) {
-        console.warn("Using simulated AR scan values:", err);
-        runSimulation();
+        console.warn("AR scan failed:", err);
       } finally {
         setIsScanning(false);
       }
@@ -410,7 +320,7 @@ function ARPage() {
           />
         )}
 
-        {/* Fallback Ambient Background */}
+        {/* Camera unavailable background */}
         {permissionState !== "granted" && (
           <div className="absolute inset-0 bg-gradient-to-b from-background to-eco-green/10 z-0" />
         )}
@@ -550,33 +460,37 @@ function ARPage() {
             </div>
           ))}
 
-        {/* Glowing path */}
+        {/* Glowing path — Google Maps-style traffic: green=safe, orange=moderate, red=hazardous */}
         <div className="pointer-events-none absolute bottom-24 left-1/2 -translate-x-1/2 z-10 flex flex-col items-center">
           {navState && navState.isNavigating && (
             <span className="mb-2 font-mono text-[8px] uppercase tracking-wider text-muted-foreground animate-pulse">
               AR Path Guidance
             </span>
           )}
-          <div
-            style={{
-              boxShadow: navState
-                ? navState.routeType === "cleanest_air"
-                  ? "0 0 15px 3px rgba(34, 197, 94, 0.4)"
-                  : navState.routeType === "lowest_carbon"
-                    ? "0 0 15px 3px rgba(59, 130, 246, 0.4)"
-                    : "0 0 15px 3px rgba(249, 115, 22, 0.4)"
-                : "none",
-            }}
-            className={`h-36 w-1.5 rounded-full bg-gradient-to-t ${
-              navState
-                ? navState.routeType === "cleanest_air"
-                  ? "from-eco-green"
-                  : navState.routeType === "lowest_carbon"
-                    ? "from-eco-blue"
-                    : "from-eco-orange"
-                : "from-eco-cream/40"
-            } to-transparent transition-all duration-500`}
-          />
+          {(() => {
+            // Determine traffic colour from live AQI (mirrors Google Maps traffic logic)
+            const aqi = navState?.isNavigating ? (navState.simulatedAqi ?? hudStats.aqi) : hudStats.aqi;
+            let pathColor = "eco-cream/40";
+            let glowColor = "none";
+            if (navState?.isNavigating) {
+              if (aqi <= 50) {
+                pathColor = "eco-green";
+                glowColor = "0 0 15px 3px rgba(34, 197, 94, 0.55)";
+              } else if (aqi <= 100) {
+                pathColor = "eco-orange";
+                glowColor = "0 0 15px 3px rgba(249, 115, 22, 0.55)";
+              } else {
+                pathColor = "eco-red";
+                glowColor = "0 0 15px 3px rgba(239, 68, 68, 0.55)";
+              }
+            }
+            return (
+              <div
+                style={{ boxShadow: glowColor }}
+                className={`h-36 w-1.5 rounded-full bg-gradient-to-t from-${pathColor} to-transparent transition-all duration-700`}
+              />
+            );
+          })()}
         </div>
 
         {/* Navigation bottom card or routing card */}
@@ -752,7 +666,6 @@ function ARPage() {
                   onClick={() => {
                     localStorage.removeItem("ecolens:navigation_state");
                     setNavState(null);
-                    // Add trip to dashboard mock metrics
                     localStorage.setItem("ecolens:lastTripAvoided", "430");
                   }}
                   className="flex-1 rounded-2xl border border-border bg-background py-3 text-sm font-semibold text-foreground hover:bg-card"
@@ -774,7 +687,7 @@ function ARPage() {
           </div>
         )}
 
-        <style>{`
+        <style suppressHydrationWarning>{`
           @keyframes sweep {
             0% { top: 0%; opacity: 0; }
             15% { opacity: 1; }

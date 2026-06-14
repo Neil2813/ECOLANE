@@ -15,7 +15,6 @@ import {
   Play,
   RotateCcw,
   CheckCircle,
-  AlertCircle,
   TrendingUp,
   RefreshCw,
   Award,
@@ -51,46 +50,13 @@ function getDirectionsInstruction(progress: number, pathLength: number) {
 }
 
 export const Route = createFileRoute("/map")({
-  head: () => ({ meta: [{ title: "Live Map · EcoLens" }] }),
+  head: () => ({ meta: [{ title: "Live Map Â· EcoLens" }] }),
   component: MapPage,
 });
 
 interface LocationSuggestion {
   name: string;
   coords: [number, number];
-}
-
-// Generate intermediate coordinates for simulated paths
-function generateRoutePoints(
-  start: [number, number],
-  end: [number, number],
-  type: string
-): [number, number][] {
-  const steps = 12;
-  const pts: [number, number][] = [];
-  for (let i = 0; i <= steps; i++) {
-    const t = i / steps;
-    let lng = start[0] + (end[0] - start[0]) * t;
-    let lat = start[1] + (end[1] - start[1]) * t;
-
-    // Bow coordinates to differentiate paths
-    if (i > 0 && i < steps) {
-      const curveOffset = Math.sin(t * Math.PI);
-      if (type === "cleanest_air") {
-        lng += (end[1] - start[1]) * 0.18 * curveOffset;
-        lat -= (end[0] - start[0]) * 0.18 * curveOffset;
-      } else if (type === "lowest_carbon") {
-        lng -= (end[1] - start[1]) * 0.12 * curveOffset;
-        lat += (end[0] - start[0]) * 0.12 * curveOffset;
-      } else {
-        // Fastest has minor zig-zag offsets
-        lng += Math.sin(i) * 0.0015 * curveOffset;
-        lat += Math.cos(i) * 0.0015 * curveOffset;
-      }
-    }
-    pts.push([lng, lat]);
-  }
-  return pts;
 }
 
 function readSavedNavigationState() {
@@ -204,8 +170,6 @@ function MapPage() {
   const [navProgress, setNavProgress] = useState<number>(savedState?.navProgress || 0);
   const [navPath, setNavPath] = useState<[number, number][]>(savedState?.navPath || []);
   const [currentNavCoords, setCurrentNavCoords] = useState<[number, number] | null>(savedState?.currentNavCoords || null);
-  const [simulatedAqi, setSimulatedAqi] = useState<number>(savedState?.simulatedAqi || 48);
-  const [showSpikeAlert, setShowSpikeAlert] = useState(false);
   const [tripCompleted, setTripCompleted] = useState<boolean>(savedState?.tripCompleted || false);
 
   // Dynamic layers state
@@ -218,9 +182,13 @@ function MapPage() {
     noise: false,
   });
 
-  // Backend-fetched routes (null = not yet fetched / demo mode)
+  // Backend-fetched routes (null = not yet fetched)
   const [apiRoutes, setApiRoutes] = useState<RouteOption[] | null>(null);
   const [fetchingRoutes, setFetchingRoutes] = useState(false);
+
+  // Keep a stable ref to the selected API route so the nav interval doesn't
+  // restart every render when apiRoutes/routeType changes.
+  const selectedApiRouteRef = useRef<RouteOption | undefined>(undefined);
 
   // Live EcoScore for current user position
   const [liveEcoScore, setLiveEcoScore] = useState<number | null>(null);
@@ -232,7 +200,10 @@ function MapPage() {
     co2_grams: number;
   } | null>(null);
 
-  // Serialize state changes to localStorage
+  // Serialize state changes to localStorage.
+  // NOTE: navPath is intentionally excluded — it's a large coordinate array
+  // that would block the main thread if serialized every 2-second nav tick.
+  // It is only saved when startNav() fires (below).
   useEffect(() => {
     if (destCoords) {
       const state = {
@@ -245,9 +216,7 @@ function MapPage() {
         routeType,
         isNavigating,
         navProgress,
-        navPath,
         currentNavCoords,
-        simulatedAqi,
         tripCompleted,
       };
       localStorage.setItem("ecolens:navigation_state", JSON.stringify(state));
@@ -264,15 +233,13 @@ function MapPage() {
     routeType,
     isNavigating,
     navProgress,
-    navPath,
     currentNavCoords,
-    simulatedAqi,
     tripCompleted,
   ]);
 
   // Fetch real routes from the backend whenever origin + destination are set
   useEffect(() => {
-    if (!destCoords || !originCoords || isDemo()) return;
+    if (!destCoords || !originCoords) return;
     const origin = { lat: originCoords[1], lng: originCoords[0] };
     const destination = { lat: destCoords[1], lng: destCoords[0] };
     setFetchingRoutes(true);
@@ -281,7 +248,10 @@ function MapPage() {
       .then((routes) => {
         if (routes.length > 0) setApiRoutes(routes);
       })
-      .catch((err) => console.warn("Route generation API error, using simulation:", err))
+      .catch((err) => {
+        console.warn("Route generation API error:", err);
+        setApiRoutes([]);
+      })
       .finally(() => setFetchingRoutes(false));
   }, [destCoords, originCoords]);
 
@@ -299,19 +269,19 @@ function MapPage() {
           }
         },
         (err) => {
-          console.warn("Geolocation permission denied/failed. Defaulting to Bengaluru.", err);
-          const fallback: [number, number] = [77.5946, 12.9716];
-          setUserLocation(fallback);
+          console.warn("Geolocation permission denied/failed. Using Bengaluru as map center.", err);
+          const defaultCenter: [number, number] = [77.5946, 12.9716];
+          setUserLocation(defaultCenter);
           if (!savedState) {
-            setOriginCoords(fallback);
+            setOriginCoords(defaultCenter);
           }
         }
       );
     } else {
-      const fallback: [number, number] = [77.5946, 12.9716];
-      setUserLocation(fallback);
+      const defaultCenter: [number, number] = [77.5946, 12.9716];
+      setUserLocation(defaultCenter);
       if (!savedState) {
-        setOriginCoords(fallback);
+        setOriginCoords(defaultCenter);
       }
     }
   }, []);
@@ -329,10 +299,10 @@ function MapPage() {
       .then((data) => {
         if (!data?.air_quality) return;
         const pm25 = data.air_quality.pm25 ?? 0;
-        // Simple ecoscore from PM2.5: 100 at 0µg, 0 at 200µg
+        // Simple ecoscore from PM2.5: 100 at 0Âµg, 0 at 200Âµg
         setLiveEcoScore(Math.max(0, Math.min(100, Math.round(100 - pm25 / 2))));
       })
-      .catch(() => { /* silent — EcoScore stays null */ });
+      .catch(() => { /* silent â€” EcoScore stays null */ });
   }, [userLocation]);
 
   // Fly to active navigation or routing coordinates if saved state exists
@@ -372,24 +342,16 @@ function MapPage() {
     }
   };
 
-  // Generate paths once coordinates are resolved
   const startPt = originCoords || userLocation || [77.5946, 12.9716];
   const endPt = destCoords;
 
-  // Helper to get polyline: prefer backend API data, fall back to client-side bezier
-  function getPolyline(type: "fastest" | "cleanest_air" | "lowest_carbon"): [number, number][] {
-    if (apiRoutes) {
-      const r = apiRoutes.find((r) => r.type === type);
-      if (r?.polyline?.length) return validCoords(r.polyline);
-    }
-    return endPt ? generateRoutePoints(startPt, endPt, type) : [];
-  }
-
-  const paths = {
-    fastest: getPolyline("fastest"),
-    cleanest_air: getPolyline("cleanest_air"),
-    lowest_carbon: getPolyline("lowest_carbon"),
-  };
+  const selectedApiRoute = apiRoutes?.find((r) => r.type === routeType);
+  // Keep the ref in sync so the nav interval can access it without being in deps
+  selectedApiRouteRef.current = selectedApiRoute;
+  const selectedPath = selectedApiRoute?.polyline?.length
+    ? validCoords(selectedApiRoute.polyline)
+    : [];
+  const selectedDistanceKm = selectedApiRoute?.distance_km ?? 0;
 
   // Select a suggestion
   const selectSuggestion = (type: "origin" | "dest", item: LocationSuggestion) => {
@@ -403,17 +365,22 @@ function MapPage() {
       setDestCoords(item.coords);
       setShowDestSuggestions(false);
       setIsRoutingMode(true);
-      setIsDirectionsExpanded(true);
+      setIsDirectionsExpanded(false);
       mapRef.current?.flyTo({ center: item.coords, zoom: 13, duration: 1200 });
     }
   };
 
-  // Save trip to database when starting navigation
-  const saveTripToBackend = async (start: [number, number], end: [number, number], selectedRouteType: string) => {
+  // Save trip to database after navigation finishes; avoid blocking PPO route start.
+  const saveTripToBackend = async (
+    start: [number, number],
+    end: [number, number],
+    selectedRouteType: string,
+    route: RouteOption | undefined,
+  ) => {
     const token = localStorage.getItem("ecolens:auth_token");
     const isDemoMode = localStorage.getItem("ecolens:auth") === "demo";
     if (!token || isDemoMode) {
-      console.log("Trip simulation in mock/offline mode.");
+      console.log("Trip save skipped without an authenticated backend session.");
       return;
     }
 
@@ -429,10 +396,12 @@ function MapPage() {
             origin: { lat: start[1], lng: start[0] },
             destination: { lat: end[1], lng: end[0] },
             route_type: selectedRouteType,
-            segment_ids: ["seg_sim_1", "seg_sim_2", "seg_sim_3"],
-            segment_durations_sec: [120, 180, 240],
+            segment_ids: route?.segment_ids ?? [],
+            segment_durations_sec: route?.segment_ids?.map(() =>
+              Math.max(30, Math.round((route.duration_min * 60) / Math.max(1, route.segment_ids.length))),
+            ) ?? [],
             started_at: new Date().toISOString(),
-            ended_at: new Date(Date.now() + 540000).toISOString(),
+            ended_at: new Date(Date.now() + Math.max(1, route?.duration_min ?? 1) * 60000).toISOString(),
           },
         }),
       });
@@ -456,7 +425,6 @@ function MapPage() {
 
   // Start navigation simulation
   const startNav = () => {
-    const selectedPath = paths[routeType];
     if (selectedPath.length === 0) return;
 
     setNavPath(selectedPath);
@@ -464,11 +432,6 @@ function MapPage() {
     setCurrentNavCoords(selectedPath[0]);
     setIsNavigating(true);
     setTripCompleted(false);
-    setShowSpikeAlert(false);
-
-    if (originCoords && destCoords) {
-      saveTripToBackend(originCoords, destCoords, routeType);
-    }
 
     // Share navigation state instantly with the AR page
     const state = {
@@ -483,7 +446,6 @@ function MapPage() {
       navProgress: 0,
       navPath: selectedPath,
       currentNavCoords: selectedPath[0],
-      simulatedAqi: 48,
       tripCompleted: false,
     };
     localStorage.setItem("ecolens:navigation_state", JSON.stringify(state));
@@ -496,20 +458,61 @@ function MapPage() {
     });
   };
 
-  // Simulated movement hook
-  useEffect(() => {
-    if (!isNavigating || tripCompleted || navPath.length === 0) return;
+  // Stable refs so the interval callback never becomes stale while also
+  // not triggering interval restarts on every render.
+  const navPathRef = useRef<[number, number][]>(navPath);
+  useEffect(() => { navPathRef.current = navPath; }, [navPath]);
+  const routeTypeRef = useRef(routeType);
+  useEffect(() => { routeTypeRef.current = routeType; }, [routeType]);
+  const originCoordsRef = useRef(originCoords);
+  useEffect(() => { originCoordsRef.current = originCoords; }, [originCoords]);
+  const destCoordsRef = useRef(destCoords);
+  useEffect(() => { destCoordsRef.current = destCoords; }, [destCoords]);
+  const apiRoutesRef = useRef(apiRoutes);
+  useEffect(() => { apiRoutesRef.current = apiRoutes; }, [apiRoutes]);
 
-    const interval = setInterval(() => {
+  // Simulated movement hook
+  // Only depends on isNavigating / tripCompleted to avoid restarting the
+  // interval every render when apiRoutes or routeType changes (which caused
+  // the UI freeze when routing results first arrived).
+  useEffect(() => {
+    if (!isNavigating || tripCompleted) return;
+
+    const interval = window.setInterval(() => {
       setNavProgress((prevProgress) => {
+        const currentNavPath = navPathRef.current;
+        if (currentNavPath.length === 0) return prevProgress;
+
         const nextProgress = prevProgress + 1;
-        if (nextProgress >= navPath.length) {
+        if (nextProgress >= currentNavPath.length) {
           clearInterval(interval);
           setTripCompleted(true);
+
+          // Immediately show values from route data so the modal is never empty.
+          // The async backend call will overwrite this with real saved data if it succeeds.
+          const route = selectedApiRouteRef.current;
+          if (route) {
+            const fastestRoute = apiRoutesRef.current?.find((r) => r.type === "fastest");
+            const fastestPm25 = fastestRoute?.pm25_exposure ?? route.pm25_exposure * 1.6;
+            setTripResult({
+              ecoscore: route.ecoscore,
+              pm25_avoided: Math.max(0, Math.round(fastestPm25 - route.pm25_exposure)),
+              co2_grams: Math.round(route.co2_grams),
+            });
+          }
+
+          if (originCoordsRef.current && destCoordsRef.current) {
+            void saveTripToBackend(
+              originCoordsRef.current,
+              destCoordsRef.current,
+              routeTypeRef.current,
+              selectedApiRouteRef.current,
+            );
+          }
           return prevProgress;
         }
 
-        const nextCoords = navPath[nextProgress];
+        const nextCoords = currentNavPath[nextProgress];
         setCurrentNavCoords(nextCoords);
         mapRef.current?.easeTo({
           center: nextCoords,
@@ -517,104 +520,40 @@ function MapPage() {
           duration: 1000,
         });
 
-        // AQI values updates
-        let baseAqi = 40 + Math.floor(Math.random() * 20);
-        if (routeType === "fastest") {
-          baseAqi += 65; // higher pollution on highways/fastest route
-        } else if (routeType === "lowest_carbon") {
-          baseAqi += 15;
-        }
-        setSimulatedAqi(baseAqi);
-
-        // Simulated Spike Alert on Fastest route at progress point 4
-        if (routeType === "fastest" && nextProgress === 4) {
-          setShowSpikeAlert(true);
-        }
-
         return nextProgress;
       });
     }, 2000);
 
     return () => clearInterval(interval);
-  }, [isNavigating, tripCompleted, navPath, routeType]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isNavigating, tripCompleted]);
 
-  // Reroute simulation
-  const acceptReroute = () => {
-    setShowSpikeAlert(false);
-    setRouteType("cleanest_air");
-
-    if (currentNavCoords && destCoords) {
-      // Recalculate remaining path from current position using Cleanest Air route logic
-      const remainingPoints = generateRoutePoints(currentNavCoords, destCoords, "cleanest_air");
-      setNavPath(remainingPoints);
-      setNavProgress(0);
-    }
-  };
 
   // Exit navigation
   const exitNavigation = () => {
     setIsNavigating(false);
     setTripCompleted(false);
-    setShowSpikeAlert(false);
     localStorage.removeItem("ecolens:navigation_state");
     mapRef.current?.easeTo({ pitch: 60, zoom: 14, duration: 1000 });
   };
-
-  // Trip is saved on start navigation instead of when completed.
-
-  // Route metrics — prefer API data, fall back to static defaults
-  const staticRouteDefaults = [
-    {
-      id: "cleanest_air" as const,
-      label: "Cleanest Air",
-      duration: 17,
-      pm25: 110,
-      co2: 180,
-      ecoscore: 87,
-      color: "bg-eco-green",
-      lineColor: "#22c55e",
-      recommended: true,
-    },
-    {
-      id: "lowest_carbon" as const,
-      label: "Lowest Carbon",
-      duration: 16,
-      pm25: 210,
-      co2: 60,
-      ecoscore: 71,
-      color: "bg-eco-blue",
-      lineColor: "#3b82f6",
-      recommended: false,
-    },
-    {
-      id: "fastest" as const,
-      label: "Fastest",
-      duration: 14,
-      pm25: 340,
-      co2: 180,
-      ecoscore: 42,
-      color: "bg-muted-foreground/40",
-      lineColor: "#94a3b8",
-      recommended: false,
-    },
-  ];
-
-  const routeOptions = staticRouteDefaults.map((def) => {
-    const apiRoute = apiRoutes?.find((r) => r.type === def.id);
-    return {
-      ...def,
-      duration: apiRoute?.duration_min ?? def.duration,
-      pm25: apiRoute?.pm25_exposure != null ? Math.round(apiRoute.pm25_exposure) : def.pm25,
-      co2: apiRoute?.co2_grams != null ? Math.round(apiRoute.co2_grams) : def.co2,
-      ecoscore: apiRoute?.ecoscore ?? def.ecoscore,
-      recommended: apiRoute?.recommended ?? def.recommended,
-    };
-  });
+  const routeOptions = (apiRoutes ?? []).map((route, index) => ({
+    id: route.type,
+    label: route.label,
+    duration: route.duration_min ?? 0,
+    distance: route.distance_km ?? 0,
+    pm25: Math.round(route.pm25_exposure ?? 0),
+    co2: Math.round(route.co2_grams ?? 0),
+    ecoscore: route.ecoscore ?? 0,
+    lineColor: routeColor(route, index),
+    recommended: route.recommended || route.ppo_recommended || false,
+    forecastNote: route.forecast_note,
+    warning: route.degradation_warning,
+  }));
 
   return (
     <MobileShell>
       <div className="relative h-dvh min-h-[480px] overflow-hidden bg-background">
-        {/* Real Map Component — mount client-side after layout is known */}
+        {/* Real Map Component â€” mount client-side after layout is known */}
         {mapReady && (
         <Map
           ref={mapRef}
@@ -673,7 +612,7 @@ function MapPage() {
             <MapMarker longitude={currentNavCoords[0]} latitude={currentNavCoords[1]}>
               <MarkerContent>
                 <span className="relative flex h-8 w-8 items-center justify-center">
-                  <span className={`absolute inset-0 rounded-full bg-eco-orange/30 ${showSpikeAlert ? 'pulse-ring' : ''}`} />
+                  <span className="absolute inset-0 rounded-full bg-eco-orange/30" />
                   <span className="flex h-5 w-5 items-center justify-center rounded-full border-2 border-background bg-eco-orange text-background shadow-md">
                     <Navigation className="h-3 w-3 fill-current" />
                   </span>
@@ -682,45 +621,45 @@ function MapPage() {
             </MapMarker>
           )}
 
-          {/* Display Route Paths */}
-          {isRoutingMode && endPt && !isNavigating && (
-            <>
-              <MapRoute
-                id="fastest-path"
-                coordinates={paths.fastest}
-                color={routeType === "fastest" ? "#94a3b8" : "#475569"}
-                width={routeType === "fastest" ? 6 : 4}
-                opacity={routeType === "fastest" ? 1.0 : 0.4}
-                onClick={() => setRouteType("fastest")}
-              />
-              <MapRoute
-                id="cleanest-path"
-                coordinates={paths.cleanest_air}
-                color={routeType === "cleanest_air" ? "#22c55e" : "#166534"}
-                width={routeType === "cleanest_air" ? 7 : 4}
-                opacity={routeType === "cleanest_air" ? 1.0 : 0.4}
-                onClick={() => setRouteType("cleanest_air")}
-              />
-              <MapRoute
-                id="lowest-carbon-path"
-                coordinates={paths.lowest_carbon}
-                color={routeType === "lowest_carbon" ? "#3b82f6" : "#1e40af"}
-                width={routeType === "lowest_carbon" ? 6 : 4}
-                opacity={routeType === "lowest_carbon" ? 1.0 : 0.4}
-                onClick={() => setRouteType("lowest_carbon")}
-              />
-            </>
-          )}
+          {/* Display backend route paths */}
+          {isRoutingMode && endPt && !isNavigating && (() => {
+            const types: Array<"fastest" | "cleanest_air" | "lowest_carbon"> = [
+              "cleanest_air",
+              "lowest_carbon",
+              "fastest",
+            ];
+            return (
+              <>
+                {types.map((type) => {
+                  const apiRoute = apiRoutes?.find((r) => r.type === type);
+                  const active = routeType === type;
+                  if (apiRoute) {
+                    return (
+                      <EnvironmentalRouteLine
+                        key={`api-${type}`}
+                        route={apiRoute}
+                        active={active}
+                        onClick={() => setRouteType(type)}
+                      />
+                    );
+                  }
+                  return null;
+                })}
+              </>
+            );
+          })()}
 
           {/* Display Navigating Active Path */}
           {isNavigating && validCoords(navPath).length > 0 && (
-            <MapRoute
-              id="active-nav-path"
-              coordinates={validCoords(navPath)}
-              color={routeType === "cleanest_air" ? "#22c55e" : routeType === "lowest_carbon" ? "#3b82f6" : "#94a3b8"}
-              width={7}
-              opacity={0.9}
-            />
+            selectedApiRoute?.risk_segments?.length ? (
+              <EnvironmentalRouteLine
+                route={selectedApiRoute}
+                active
+                idPrefix="active-nav"
+              />
+            ) : (
+              null
+            )
           )}
 
           {/* Environmental Overlay Layers */}
@@ -797,7 +736,7 @@ function MapPage() {
                     {fetchingRoutes && (
                       <span className="ml-auto flex items-center gap-1 font-mono text-[10px] text-eco-orange">
                         <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-eco-orange" />
-                        Fetching routes…
+                        Fetching routesâ€¦
                       </span>
                     )}
                   </div>
@@ -933,10 +872,10 @@ function MapPage() {
               {/* EcoScore Indicator */}
               <div
                 className="flex h-16 w-20 flex-col items-center justify-center rounded-2xl border border-border bg-card/90 text-foreground shadow-lg backdrop-blur-md"
-                title={liveEcoScore != null ? `Current Location EcoScore: ${liveEcoScore}` : "Loading EcoScore…"}
+                title={liveEcoScore != null ? `Current Location EcoScore: ${liveEcoScore}` : "Loading EcoScoreâ€¦"}
               >
                 <span className="text-[18px] font-bold text-eco-green leading-none">
-                  {liveEcoScore != null ? liveEcoScore : "–"}
+                  {liveEcoScore != null ? liveEcoScore : "â€“"}
                 </span>
                 <span className="text-[8px] font-mono font-semibold uppercase text-muted-foreground leading-none mt-1.5">EcoScore</span>
               </div>
@@ -997,59 +936,87 @@ function MapPage() {
 
             {/* BOTTOM SHEET: Routes list overlay if destination selected */}
             {isRoutingMode && endPt && (
-              <div className="absolute inset-x-4 bottom-3 z-10 max-h-[45%] overflow-y-auto rounded-3xl border border-border bg-card/90 p-4 shadow-2xl backdrop-blur-md flex flex-col gap-3">
-                <div className="flex items-center justify-between border-b border-border/50 pb-2">
+              <div className="absolute inset-x-4 bottom-3 z-10 rounded-3xl border border-border bg-card/90 shadow-2xl backdrop-blur-md flex flex-col" style={{ maxHeight: "52%" }}>
+                {/* Fixed header */}
+                <div className="flex items-center justify-between border-b border-border/50 px-4 pt-4 pb-3 shrink-0">
                   <h3 className="text-sm font-bold">Recommended Routes</h3>
-                  <span className="font-mono text-[10px] text-muted-foreground uppercase">SDG 11 / 13 Route Optimization</span>
+                  {fetchingRoutes && (
+                    <span className="flex items-center gap-1 font-mono text-[10px] text-eco-orange">
+                      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-eco-orange" />
+                      Fetching routes…
+                    </span>
+                  )}
                 </div>
 
-                <div className="flex flex-col gap-2">
+                {/* Scrollable route cards */}
+                <div className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-2">
+                  {!fetchingRoutes && routeOptions.length === 0 && (
+                    <div className="rounded-2xl border border-eco-red/30 bg-eco-red/10 p-4 text-center text-xs text-eco-red">
+                      Could not load routes from the backend.
+                    </div>
+                  )}
                   {routeOptions.map((opt) => {
                     const active = routeType === opt.id;
+                    // Colour strip per route type
+                    const stripColor = opt.id === "cleanest_air" ? "bg-eco-green" : opt.id === "lowest_carbon" ? "bg-eco-blue" : "bg-eco-orange";
                     return (
                       <button
                         key={opt.id}
-                        onClick={() => setRouteType(opt.id as any)}
+                        onClick={() => setRouteType(opt.id as "fastest" | "cleanest_air" | "lowest_carbon")}
                         className={`flex flex-col gap-2 rounded-2xl border p-3 text-left transition-all ${
                           active ? "border-eco-green bg-background/80 shadow-md" : "border-border/60 bg-transparent"
                         }`}
                       >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-semibold">{opt.label}</span>
-                            {opt.recommended && (
-                              <span className="rounded-full bg-eco-green/10 px-1.5 py-0.5 font-mono text-[8px] uppercase tracking-wider text-eco-green">
-                                Recommended
-                              </span>
-                            )}
-                          </div>
+                        <div className="flex items-center gap-2">
+                          {/* Traffic-style colour dot */}
+                          <span className={`h-2.5 w-2.5 rounded-full shrink-0 ${stripColor}`} />
+                          <span className="text-xs font-semibold flex-1">{opt.label}</span>
+                          {opt.recommended && (
+                            <span className="rounded-full bg-eco-green/10 px-1.5 py-0.5 font-mono text-[8px] uppercase tracking-wider text-eco-green">
+                              PPO Pick
+                            </span>
+                          )}
                           <span
                             className={`rounded-full px-2 py-0.5 font-mono text-[10px] font-bold ${
-                              opt.ecoscore >= 70 ? "bg-eco-green/10 text-eco-green" : "bg-eco-orange/10 text-eco-orange"
+                              opt.ecoscore >= 70 ? "bg-eco-green/10 text-eco-green" : opt.ecoscore >= 45 ? "bg-eco-orange/10 text-eco-orange" : "bg-eco-red/10 text-eco-red"
                             }`}
                           >
-                            EcoScore: {opt.ecoscore}
+                            {opt.ecoscore}
                           </span>
                         </div>
-
-                        <div className="flex justify-between items-center text-[10px] font-mono text-muted-foreground">
-                          <div>⏱️ {opt.duration} mins · 🗺️ 3.5 km</div>
+                        <div className="flex justify-between items-center text-[10px] font-mono text-muted-foreground ml-4">
+                          <div>{formatDuration(opt.duration)} · {opt.distance.toFixed(opt.distance >= 100 ? 0 : 1)} km</div>
                           <div className="flex items-center gap-2">
-                            <span className="flex items-center gap-0.5"><Leaf className="h-3 w-3 text-eco-green" /> {opt.pm25}µg PM2.5</span>
-                            <span className="flex items-center gap-0.5"><Award className="h-3 w-3 text-eco-blue" /> {opt.co2}g CO₂</span>
+                            <span className="flex items-center gap-0.5"><Leaf className="h-3 w-3 text-eco-green" /> {opt.pm25}µg</span>
+                            <span className="flex items-center gap-0.5"><Award className="h-3 w-3 text-eco-blue" /> {opt.co2}g</span>
                           </div>
                         </div>
+                        {opt.warning && (
+                          <div className="ml-4 rounded-full bg-eco-orange/10 px-2 py-0.5 font-mono text-[9px] uppercase text-eco-orange">
+                            {opt.warning}
+                          </div>
+                        )}
+                        {opt.forecastNote && (
+                          <p className="ml-4 text-[10px] leading-snug text-muted-foreground">
+                            {opt.forecastNote}
+                          </p>
+                        )}
                       </button>
                     );
                   })}
                 </div>
 
-                <button
-                  onClick={startNav}
-                  className="mt-1 flex w-full items-center justify-center gap-2 rounded-2xl bg-eco-orange py-3.5 text-sm font-semibold text-background transition-transform active:scale-[0.98] shadow-lg shadow-eco-orange/20"
-                >
-                  <Navigation className="h-4 w-4 fill-current" /> Start Navigation
-                </button>
+                {/* Fixed Start Navigation button — always visible */}
+                <div className="shrink-0 px-4 pb-4 pt-2 border-t border-border/40">
+                  <button
+                    onClick={startNav}
+                    disabled={selectedPath.length === 0}
+                    className="flex w-full items-center justify-center gap-2 rounded-2xl bg-eco-orange py-3.5 text-sm font-semibold text-background transition-transform active:scale-[0.98] shadow-lg shadow-eco-orange/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <Navigation className="h-4 w-4 fill-current" />
+                    {selectedPath.length === 0 ? "Loading route…" : "Start Navigation"}
+                  </button>
+                </div>
               </div>
             )}
 
@@ -1104,34 +1071,6 @@ function MapPage() {
               );
             })()}
 
-            {/* Simulated mid-route environmental hazard spike alert */}
-            {showSpikeAlert && (
-              <div className="mx-auto max-w-sm rounded-2xl bg-eco-red p-4 text-eco-cream shadow-2xl pointer-events-auto flex flex-col gap-3 animate-bounce">
-                <div className="flex items-start gap-3">
-                  <AlertCircle className="h-5 w-5 shrink-0" strokeWidth={2.5} />
-                  <div>
-                    <h4 className="text-xs font-bold font-mono">POLLUTION WARNING</h4>
-                    <p className="mt-1 text-[11px] leading-snug">
-                      High PM2.5 levels detected ahead on Fastest Route. Tap to switch to the Cleanest Air detour.
-                    </p>
-                  </div>
-                </div>
-                <div className="flex gap-2 justify-end">
-                  <button
-                    onClick={() => setShowSpikeAlert(false)}
-                    className="rounded-lg border border-eco-cream/40 bg-transparent px-3 py-1.5 font-mono text-[10px] font-semibold text-eco-cream/80 hover:bg-white/10"
-                  >
-                    Dismiss
-                  </button>
-                  <button
-                    onClick={acceptReroute}
-                    className="rounded-lg bg-eco-cream px-3 py-1.5 font-mono text-[10px] font-bold text-eco-red shadow hover:bg-white"
-                  >
-                    Reroute (+3 mins)
-                  </button>
-                </div>
-              </div>
-            )}
 
             {/* Bottom active HUD sheet */}
             <div className="w-full rounded-2xl border border-border bg-card/90 p-4 shadow-xl backdrop-blur-md pointer-events-auto flex flex-col gap-3">
@@ -1140,36 +1079,34 @@ function MapPage() {
                   <span className="font-mono text-xs font-bold text-eco-orange animate-pulse">● Navigating</span>
                   <span className="text-[10px] font-mono text-muted-foreground">{routeType.replace("_", " ").toUpperCase()}</span>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Link
-                    to="/ar"
-                    className="flex h-8 items-center gap-1 rounded-full border border-border bg-background px-2.5 text-[10px] font-semibold text-foreground hover:bg-card"
-                  >
-                    <ScanLine className="h-3.5 w-3.5 text-eco-orange" />
-                    AR
-                  </Link>
-                <span className={`rounded-full px-2 py-0.5 font-mono text-[9px] font-bold ${
-                  simulatedAqi <= 50 ? "bg-eco-green/10 text-eco-green" : simulatedAqi <= 100 ? "bg-eco-orange/10 text-eco-orange" : "bg-eco-red/10 text-eco-red"
-                }`}>
-                  Live Segment AQI: {simulatedAqi}
-                </span>
-                </div>
+                <Link
+                  to="/ar"
+                  className="flex h-8 items-center gap-1 rounded-full border border-border bg-background px-2.5 text-[10px] font-semibold text-foreground hover:bg-card"
+                >
+                  <ScanLine className="h-3.5 w-3.5 text-eco-orange" />
+                  AR
+                </Link>
               </div>
 
               <div className="flex items-center justify-between">
                 <div>
                   <div className="text-lg font-bold text-foreground">
-                    {Math.max(1, Math.ceil((12 * (navPath.length - navProgress)) / navPath.length))} mins remaining
+                    {selectedApiRoute
+                      ? `${Math.max(1, Math.round(selectedApiRoute.duration_min * (1 - navProgress / Math.max(1, navPath.length))))} min remaining`
+                      : "— min remaining"}
                   </div>
                   <div className="font-mono text-[10px] text-muted-foreground uppercase">
-                    {(3.5 * (1 - navProgress / navPath.length)).toFixed(1)} km left
+                    {selectedApiRoute
+                      ? `${(selectedApiRoute.distance_km * (1 - navProgress / Math.max(1, navPath.length))).toFixed(1)} km left`
+                      : "— km left"}
                   </div>
                 </div>
 
                 <div className="flex flex-col items-end">
-                  <div className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground">Eco Protection</div>
+                  <div className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground">PM2.5 Exposure</div>
                   <div className="flex items-center gap-1 text-xs font-bold text-eco-green">
-                    <Leaf className="h-4 w-4" /> Avoided {routeType === "cleanest_air" ? "430 µg" : "120 µg"}
+                    <Leaf className="h-4 w-4" />
+                    {selectedApiRoute ? `${Math.round(selectedApiRoute.pm25_exposure)} µg` : "—"}
                   </div>
                 </div>
               </div>
@@ -1200,26 +1137,28 @@ function MapPage() {
               <div className="grid grid-cols-3 gap-2 border-y border-border py-4 my-2">
                 <div className="flex flex-col items-center">
                   <span className="text-lg font-bold text-eco-green">
-                    {tripResult?.ecoscore ?? "–"}
+                    {tripResult != null ? tripResult.ecoscore : "—"}
                   </span>
                   <span className="font-mono text-[9px] uppercase text-muted-foreground">EcoScore</span>
                 </div>
                 <div className="flex flex-col items-center border-x border-border">
                   <span className="text-lg font-bold text-eco-green">
-                    {tripResult != null ? `${tripResult.pm25_avoided.toFixed(0)}µg` : "–"}
+                    {tripResult != null ? `${tripResult.pm25_avoided.toFixed(0)} µg` : "—"}
                   </span>
                   <span className="font-mono text-[9px] uppercase text-muted-foreground">PM2.5 Saved</span>
                 </div>
                 <div className="flex flex-col items-center">
                   <span className="text-lg font-bold text-eco-blue">
-                    {tripResult != null ? `${tripResult.co2_grams.toFixed(0)}g` : "–"}
+                    {tripResult != null ? `${tripResult.co2_grams.toFixed(0)} g` : "—"}
                   </span>
                   <span className="font-mono text-[9px] uppercase text-muted-foreground">CO₂ Saved</span>
                 </div>
               </div>
 
               <p className="text-xs leading-relaxed text-muted-foreground">
-                Fantastic job! By taking the {routeType.replace("_", " ")} route, you successfully avoided inhaling harmful micro-pollutants and reduced your carbon output.
+                {tripResult != null
+                  ? `Great work! Your ${routeType.replace("_", " ")} route earned you an EcoScore of ${tripResult.ecoscore}.`
+                  : "Trip data is being processed. Check your dashboard for updated stats."}
               </p>
 
               <div className="flex gap-3 mt-2">
@@ -1276,6 +1215,88 @@ function validCoords(coords: [number, number][]): [number, number][] {
   return coords.filter(isValidCoordPair);
 }
 
+/**
+ * Returns a hex colour for a route card/polyline based on route type and index.
+ * Green = cleanest air, Blue = lowest carbon, Orange = fastest.
+ */
+function routeColor(route: { type?: string }, index: number): string {
+  if (route?.type === "cleanest_air") return "#22c55e"; // eco-green
+  if (route?.type === "lowest_carbon") return "#3b82f6"; // eco-blue
+  if (route?.type === "fastest") return "#f97316";        // eco-orange
+  const palette = ["#22c55e", "#3b82f6", "#f97316"];
+  return palette[index % palette.length];
+}
+
+function nearestRoutePointIndex(route: [number, number][], point: [number, number]): number {
+  let bestIndex = 0;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  route.forEach(([lng, lat], index) => {
+    const distance = (lng - point[0]) ** 2 + (lat - point[1]) ** 2;
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestIndex = index;
+    }
+  });
+  return bestIndex;
+}
+
+/** Format decimal minutes → "X h Y min" or "Y min" */
+function formatDuration(minutes: number): string {
+  if (!minutes || minutes <= 0) return "—";
+  const h = Math.floor(minutes / 60);
+  const m = Math.round(minutes % 60);
+  if (h > 0) return `${h} h ${m} min`;
+  return `${m} min`;
+}
+
+/**
+ * Renders a MapRoute polyline per backend route.
+ * Colours each segment green/orange/red based on environmental risk data (like Google Maps traffic).
+ */
+function EnvironmentalRouteLine({
+  route,
+  active,
+  idPrefix,
+  onClick,
+}: {
+  route: import("@/lib/api/routes").RouteOption;
+  active: boolean;
+  idPrefix?: string;
+  onClick?: () => void;
+}) {
+  const prefix = idPrefix ?? `route-${route.type}`;
+
+  // If the route has risk_segments, render each segment with its own environmental colour.
+  if (route.risk_segments && route.risk_segments.length > 0) {
+    return (
+      <>
+        {route.risk_segments.map((seg: any, i: number) => {
+          const coords: [number, number][] = validCoords(seg.coordinates ?? []);
+          if (coords.length < 2) return null;
+          // Determine colour from segment risk level (mirrors Google Maps green/orange/red traffic)
+          // risk_segments use: "safe" | "moderate" | "worst" — see routes.ts
+          let color = "#22c55e"; // green = safe
+          if (seg.risk === "moderate" || seg.score < 60) color = "#f97316"; // orange
+          if (seg.risk === "worst" || seg.score < 30) color = "#ef4444";   // red
+          return (
+            <MapRoute
+              key={`${prefix}-seg-${i}`}
+              id={`${prefix}-seg-${i}`}
+              coordinates={coords}
+              color={color}
+              width={active ? 6 : 4}
+              opacity={active ? 0.95 : 0.65}
+              onClick={onClick}
+            />
+          );
+        })}
+      </>
+    );
+  }
+
+  return null;
+}
+
 function sanitizeEnvironmentFeatures(data: any) {
   if (!data?.features) {
     return { type: "FeatureCollection" as const, features: [] };
@@ -1287,10 +1308,10 @@ function sanitizeEnvironmentFeatures(data: any) {
       if (coords.length < 2) return null;
 
       const props = { ...(feature.properties ?? {}) };
-      for (const [key, fallback] of Object.entries(ENV_NUMERIC_DEFAULTS)) {
+      for (const [key, defaultValue] of Object.entries(ENV_NUMERIC_DEFAULTS)) {
         const value = props[key];
         if (value == null || typeof value !== "number" || !Number.isFinite(value)) {
-          props[key] = fallback;
+          props[key] = defaultValue;
         }
       }
 
@@ -1318,8 +1339,11 @@ function isMapStyleReady(map: { getStyle: () => unknown } | null) {
   }
 }
 
-function envNumericExpr(property: string, fallback: number) {
-  return ["coalesce", ["to-number", ["get", property]], fallback];
+function envNumericExpr(property: string, defaultValue: number) {
+  // Use the 3-arg form: ["to-number", expr, fallback] which MapLibre supports.
+  // This correctly coerces null property values to the fallback number at
+  // the expression evaluation level, preventing the "Expected number, found null" error.
+  return ["coalesce", ["to-number", ["get", property], defaultValue], defaultValue];
 }
 
 interface EnvironmentalOverlaysProps {
@@ -1358,12 +1382,6 @@ function EnvironmentalOverlays({ activeLayers }: EnvironmentalOverlaysProps) {
         green: "ndvi",
         noise: "noise_db",
       };
-
-      if (isDemo()) {
-        const mockData = generateMockEnvironmentFeatures(bbox, activeKey);
-        setFeatures(sanitizeEnvironmentFeatures(mockData));
-        return;
-      }
 
       try {
         const url = `/api/tiles/environment?bbox=${bbox}&layers=${layerMap[activeKey]}`;
@@ -1527,45 +1545,5 @@ function MapEnvironmentalLayer({ id, data, activeKey }: MapEnvironmentalLayerPro
   }, [isLoaded, map, data, sourceId, lineLayerId, glowLayerId, activeKey]);
 
   return null;
-}
-
-function generateMockEnvironmentFeatures(bbox: string, activeKey: string) {
-  const [min_lng, min_lat, max_lng, max_lat] = bbox.split(",").map(Number);
-  const features = [];
-  for (let i = 0; i < 5; i++) {
-    const sid = `seg_demo_${i}`;
-    const coords = [
-      [min_lng + (i * 0.002) + 0.001, min_lat + (i * 0.002) + 0.001],
-      [min_lng + (i * 0.002) + 0.004, min_lat + (i * 0.002) + 0.0025],
-    ];
-    const h = Math.abs(sid.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0));
-    const pm25 = 40 + (h % 120);
-    const co2 = 1.5 + ((h / 7) % 60) / 10;
-    const noise = 40 + (h % 35);
-    const heat = ((h / 5) % 40) / 10;
-    const ndvi = ((h / 11) % 100) / 100;
-    
-    const props = {
-      pm25: pm25,
-      no2: 15 + (h % 40),
-      carbon_intensity: co2 > 4.5 ? "high" : co2 > 3 ? "medium" : "low",
-      co2_per_min: co2,
-      ndvi: ndvi,
-      noise_db: noise,
-      heat_anomaly: heat,
-      ecoscore: Math.max(0, Math.min(100, Math.round(100 - (0.35 * pm25 + 8 * co2 + 0.9 * noise + 5 * heat - 12 * ndvi)))),
-    };
-    
-    features.push({
-      type: "Feature",
-      geometry: { type: "LineString", coordinates: coords },
-      properties: { segment_id: sid, ...props },
-    });
-  }
-  return {
-    type: "FeatureCollection",
-    updated_at: new Date().toISOString(),
-    features: features
-  };
 }
 

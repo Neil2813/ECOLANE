@@ -21,7 +21,7 @@ WEIGHTS = {
 }
 
 
-def _segment_from_db_or_fallback(db: Session, segment_id: str) -> dict:
+def _segment_from_db(db: Session, segment_id: str) -> dict | None:
     seg = None
     if not db.info.get("segment_lookup_unavailable"):
         try:
@@ -41,20 +41,26 @@ def _segment_from_db_or_fallback(db: Session, segment_id: str) -> dict:
             "noise_db": float(seg.noise_db or 0),
             "heat_anomaly": float(seg.heat_anomaly or 0),
         }
+    return None
 
-    h = abs(hash(segment_id))
-    return {
-        "pm25": float(40 + (h % 120)),
-        "no2": float(15 + (h % 40)),
-        "co2_per_min": float(1.5 + ((h // 7) % 60) / 10),
-        "ndvi": float(((h // 11) % 100) / 100),
-        "noise_db": float(40 + (h % 35)),
-        "heat_anomaly": float(((h // 5) % 40) / 10),
-    }
+
+_CITY_AVG_DEFAULTS = {
+    # Realistic Bengaluru urban air quality averages (CPCB data)
+    "pm25": 85.0,   # µg/m³ — moderate urban
+    "no2": 32.0,    # µg/m³
+    "co2_per_min": 4.5,  # g/min — city driving
+    "ndvi": 0.28,   # low-moderate green cover
+    "noise_db": 65.0,   # urban road noise
+    "heat_anomaly": 2.1,  # +2°C urban heat island
+}
 
 
 def compute_route_signals(db: Session, route: CandidateRoute, weather_data: dict | None = None) -> dict:
-    segments = [_segment_from_db_or_fallback(db, sid) for sid in route.segment_ids]
+    segments = [segment for sid in route.segment_ids if (segment := _segment_from_db(db, sid))]
+    # When no DB segments exist (e.g. OSRM-generated routes with synthetic IDs),
+    # use city-average defaults so the route still gets scored and returned.
+    if not segments:
+        segments = [_CITY_AVG_DEFAULTS]
     count = max(1, len(segments))
     duration_per_segment = route.duration_min / count
 
