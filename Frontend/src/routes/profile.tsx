@@ -12,19 +12,27 @@ export const Route = createFileRoute("/profile")({
 
 function ProfilePage() {
   const navigate = useNavigate();
-  const [dark, setDark] = useState(true);
+  const [dark, setDark] = useState(false);
   const [pollutionAlerts, setPollutionAlerts] = useState(true);
   const [dailyReport, setDailyReport] = useState(true);
   const [user, setUser] = useState<AuthUser | null>(null);
 
   useEffect(() => {
     setUser(getCachedUser());
+    if (localStorage.getItem("theme") === "dark") {
+      setDark(true);
+      document.documentElement.classList.remove("light");
+    } else {
+      setDark(false);
+      document.documentElement.classList.add("light");
+    }
   }, []);
 
   const toggleTheme = () => {
     const next = !dark;
     setDark(next);
     document.documentElement.classList.toggle("light", !next);
+    localStorage.setItem("theme", next ? "dark" : "light");
   };
 
   const signOut = async () => {

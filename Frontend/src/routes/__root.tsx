@@ -103,6 +103,19 @@ function RootShell({ children }: { children: ReactNode }) {
     <html lang="en">
       <head>
         <HeadContent />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              try {
+                if (localStorage.getItem('theme') === 'dark') {
+                  document.documentElement.classList.remove('light');
+                } else {
+                  document.documentElement.classList.add('light');
+                }
+              } catch (e) {}
+            `,
+          }}
+        />
       </head>
       <body>
         <div className="mx-auto flex min-h-[100dvh] w-full max-w-md flex-col bg-background shadow-2xl sm:border-x sm:border-border relative isolate overflow-hidden">

@@ -10,6 +10,7 @@ from app.db.models import User, OTPToken, Trip, DailyExposure, LSTMForecast, Env
 from app.utils.argon2_handler import hash_password
 from app.utils.jwt_handler import create_access_token
 from app.utils.osm_loader import load_graph, nearest_node
+from app.ml.ppo_router import recommend_routes
 
 ROUTE_TYPES = ["fastest", "cleanest_air", "lowest_carbon"]
 
@@ -167,36 +168,12 @@ def _route_metrics_for_path(db: Session, graph: nx.Graph, path, route_type: str)
     }
 
 def generate_routes(db: Session, origin: dict, destination: dict):
-    graph = load_graph()
-    a = nearest_node(graph, origin["lat"], origin["lng"])
-    b = nearest_node(graph, destination["lat"], destination["lng"])
-    try:
-        fastest_path = nx.shortest_path(graph, a, b, weight="travel_time")
-    except Exception:
-        nodes = list(graph.nodes())
-        fastest_path = nodes[: min(4, len(nodes))]
-    try:
-        clean_path = nx.shortest_path(graph, a, b, weight="length")
-    except Exception:
-        clean_path = fastest_path
-    try:
-        carbon_path = nx.shortest_path(graph, a, b, weight="length")
-    except Exception:
-        carbon_path = fastest_path
-
-    fastest = _route_metrics_for_path(db, graph, fastest_path, "fastest")
-    fastest.update({"type": "fastest", "label": "Fastest", "recommended": False})
-
-    clean = _route_metrics_for_path(db, graph, clean_path, "cleanest_air")
-    clean.update({"type": "cleanest_air", "label": "Cleanest Air", "recommended": True})
-
-    carbon = _route_metrics_for_path(db, graph, carbon_path, "lowest_carbon")
-    carbon.update({"type": "lowest_carbon", "label": "Lowest Carbon", "recommended": False})
-
-    best = max([fastest, clean, carbon], key=lambda x: x["ecoscore"])
-    for r in [fastest, clean, carbon]:
-        r["recommended"] = r["type"] == best["type"]
-    return [fastest, clean, carbon]
+    return recommend_routes(
+        db,
+        origin,
+        destination,
+        register_load=False,
+    )["routes"]
 
 def generate_reroute(db: Session, current_position: dict, destination: dict, original_route_type: str, reason: str):
     routes = generate_routes(db, current_position, destination)

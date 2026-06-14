@@ -26,8 +26,29 @@ import { Map, MapRoute, MapMarker, MarkerContent, useMap, type MapRef } from "@/
 import { generateRoutes, type RouteOption } from "@/lib/api/routes";
 import { isDemo, apiFetch } from "@/lib/api/client";
 
-const LIGHT_STYLE = "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json";
-const DARK_STYLE = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
+const LIGHT_STYLE = "https://tiles.openfreemap.org/styles/liberty";
+const DARK_STYLE = "https://tiles.openfreemap.org/styles/liberty";
+
+// Helper for dynamic turn-by-turn directions based on progress
+function getDirectionsInstruction(progress: number, pathLength: number) {
+  if (pathLength === 0) return { text: "Proceed to destination", type: "straight" };
+  
+  const remainingSteps = pathLength - progress;
+  if (remainingSteps <= 1) {
+    return { text: "Arrived at your destination", type: "arrive" };
+  }
+
+  if (progress < 3) {
+    const meters = Math.max(50, 250 - progress * 50);
+    return { text: `In ${meters} meters, take a right onto Cubbon Rd`, type: "right" };
+  } else if (progress < 7) {
+    const meters = Math.max(50, 400 - (progress - 3) * 50);
+    return { text: `In ${meters} meters, turn left toward Residency Rd`, type: "left" };
+  } else {
+    const meters = Math.max(50, 150 - (progress - 7) * 50);
+    return { text: `In ${meters} meters, proceed straight to destination`, type: "straight" };
+  }
+}
 
 export const Route = createFileRoute("/map")({
   head: () => ({ meta: [{ title: "Live Map · EcoLens" }] }),
@@ -387,6 +408,52 @@ function MapPage() {
     }
   };
 
+  // Save trip to database when starting navigation
+  const saveTripToBackend = async (start: [number, number], end: [number, number], selectedRouteType: string) => {
+    const token = localStorage.getItem("ecolens:auth_token");
+    const isDemoMode = localStorage.getItem("ecolens:auth") === "demo";
+    if (!token || isDemoMode) {
+      console.log("Trip simulation in mock/offline mode.");
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/exposure/calculate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          trip: {
+            origin: { lat: start[1], lng: start[0] },
+            destination: { lat: end[1], lng: end[0] },
+            route_type: selectedRouteType,
+            segment_ids: ["seg_sim_1", "seg_sim_2", "seg_sim_3"],
+            segment_durations_sec: [120, 180, 240],
+            started_at: new Date().toISOString(),
+            ended_at: new Date(Date.now() + 540000).toISOString(),
+          },
+        }),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        console.log("Trip successfully saved to backend database!");
+        setTripResult({
+          ecoscore: result.ecoscore ?? 0,
+          pm25_avoided: result.pm25_avoided ?? 0,
+          co2_grams: result.co2_grams ?? 0,
+        });
+      } else {
+        const err = await response.json();
+        console.error("Failed to save trip to backend:", err);
+      }
+    } catch (err) {
+      console.warn("Backend offline, could not save trip to backend:", err);
+    }
+  };
+
   // Start navigation simulation
   const startNav = () => {
     const selectedPath = paths[routeType];
@@ -399,10 +466,32 @@ function MapPage() {
     setTripCompleted(false);
     setShowSpikeAlert(false);
 
+    if (originCoords && destCoords) {
+      saveTripToBackend(originCoords, destCoords, routeType);
+    }
+
+    // Share navigation state instantly with the AR page
+    const state = {
+      originText,
+      originCoords,
+      destText,
+      destCoords,
+      isRoutingMode,
+      isDirectionsExpanded,
+      routeType,
+      isNavigating: true,
+      navProgress: 0,
+      navPath: selectedPath,
+      currentNavCoords: selectedPath[0],
+      simulatedAqi: 48,
+      tripCompleted: false,
+    };
+    localStorage.setItem("ecolens:navigation_state", JSON.stringify(state));
+
     mapRef.current?.flyTo({
       center: selectedPath[0],
-      zoom: 16,
-      pitch: 50,
+      zoom: 16.5,
+      pitch: 60,
       duration: 1000,
     });
   };
@@ -467,61 +556,11 @@ function MapPage() {
     setIsNavigating(false);
     setTripCompleted(false);
     setShowSpikeAlert(false);
-    mapRef.current?.easeTo({ pitch: 45, zoom: 14, duration: 1000 });
+    localStorage.removeItem("ecolens:navigation_state");
+    mapRef.current?.easeTo({ pitch: 60, zoom: 14, duration: 1000 });
   };
 
-  // Save trip to database when completed
-  useEffect(() => {
-    if (tripCompleted && isNavigating && originCoords && destCoords) {
-      const saveTripToBackend = async () => {
-        const token = localStorage.getItem("ecolens:auth_token");
-        const isDemo = localStorage.getItem("ecolens:auth") === "demo";
-        if (!token || isDemo) {
-          console.log("Trip simulation completed in mock/offline mode.");
-          return;
-        }
-
-        try {
-          const response = await fetch("/api/exposure/calculate", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${token}`,
-            },
-            body: JSON.stringify({
-              trip: {
-                origin: { lat: originCoords[1], lng: originCoords[0] },
-                destination: { lat: destCoords[1], lng: destCoords[0] },
-                route_type: routeType,
-                segment_ids: ["seg_sim_1", "seg_sim_2", "seg_sim_3"],
-                segment_durations_sec: [120, 180, 240],
-                started_at: new Date(Date.now() - 540000).toISOString(),
-                ended_at: new Date().toISOString(),
-              },
-            }),
-          });
-
-          if (response.ok) {
-            const result = await response.json();
-            console.log("Trip successfully saved to backend database!");
-            // Store real metrics for the completion modal
-            setTripResult({
-              ecoscore: result.ecoscore ?? 0,
-              pm25_avoided: result.pm25_avoided ?? 0,
-              co2_grams: result.co2_grams ?? 0,
-            });
-          } else {
-            const err = await response.json();
-            console.error("Failed to save trip to backend:", err);
-          }
-        } catch (err) {
-          console.warn("Backend offline, could not save trip to backend:", err);
-        }
-      };
-
-      saveTripToBackend();
-    }
-  }, [tripCompleted, isNavigating, originCoords, destCoords, routeType]);
+  // Trip is saved on start navigation instead of when completed.
 
   // Route metrics — prefer API data, fall back to static defaults
   const staticRouteDefaults = [
@@ -574,15 +613,15 @@ function MapPage() {
 
   return (
     <MobileShell>
-      <div className="relative h-[calc(100vh-6rem)] overflow-hidden bg-background">
+      <div className="relative h-dvh min-h-[480px] overflow-hidden bg-background">
         {/* Real Map Component — mount client-side after layout is known */}
         {mapReady && (
         <Map
           ref={mapRef}
           theme="dark"
           center={userLocation || [77.5946, 12.9716]}
-          zoom={13}
-          pitch={45}
+          zoom={15}
+          pitch={60}
           className="absolute inset-0 h-full w-full min-h-[300px]"
           styles={{
             light: lightStyle,
@@ -705,6 +744,10 @@ function MapPage() {
                     onFocus={() => {
                       setIsDirectionsExpanded(true);
                       setShowDestSuggestions(true);
+                      if (!originCoords && userLocation) {
+                        setOriginCoords(userLocation);
+                        setOriginText("My Location");
+                      }
                     }}
                     placeholder="Where are you going?"
                     className="flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
@@ -885,49 +928,26 @@ function MapPage() {
               )}
             </div>
 
-            {/* Quick Floating Map Utilities */}
-            <div className="absolute right-4 top-24 z-10 flex flex-col gap-3">
-              {/* Geolocation FAB */}
-              <button
-                onClick={handleLocateMe}
-                className="flex h-12 w-12 items-center justify-center rounded-full border border-border bg-card/85 text-foreground shadow-lg backdrop-blur-md transition-transform active:scale-95 hover:bg-card"
-                title="Geolocate Live Position"
-                suppressHydrationWarning
-              >
-                <Crosshair className="h-5 w-5 text-eco-blue" />
-              </button>
-
-              {/* Layer Panel Trigger */}
-              <button
-                onClick={() => setLayerOpen(!layerOpen)}
-                className={`flex h-12 w-12 items-center justify-center rounded-full border shadow-lg backdrop-blur-md transition-transform active:scale-95 ${
-                  layerOpen ? "border-eco-orange bg-eco-orange text-background glow-orange" : "border-border bg-card/85 text-foreground"
-                }`}
-                title="Toggle Environment Overlays"
-                suppressHydrationWarning
-              >
-                <Layers className="h-5 w-5" />
-              </button>
-
+            {/* Left side panel: EcoScore and Map layers */}
+            <div className="absolute left-4 top-24 z-10 flex flex-col gap-3 pointer-events-auto">
               {/* EcoScore Indicator */}
               <div
-                className="flex h-12 w-12 flex-col items-center justify-center rounded-full border border-border bg-card/85 text-foreground shadow-lg backdrop-blur-md"
+                className="flex h-16 w-20 flex-col items-center justify-center rounded-2xl border border-border bg-card/90 text-foreground shadow-lg backdrop-blur-md"
                 title={liveEcoScore != null ? `Current Location EcoScore: ${liveEcoScore}` : "Loading EcoScore…"}
               >
-                <span className="text-[13px] font-bold text-eco-green leading-none">
+                <span className="text-[18px] font-bold text-eco-green leading-none">
                   {liveEcoScore != null ? liveEcoScore : "–"}
                 </span>
-                <span className="text-[7px] font-mono font-semibold uppercase text-muted-foreground leading-none mt-1">EcoScore</span>
+                <span className="text-[8px] font-mono font-semibold uppercase text-muted-foreground leading-none mt-1.5">EcoScore</span>
               </div>
 
-            </div>
-
-
-            {/* Environment Overlay Sub-Panel */}
-            {layerOpen && (
-              <div className="absolute right-4 top-60 z-10 w-44 rounded-2xl border border-border bg-card/95 p-3 shadow-xl backdrop-blur-md animate-in fade-in slide-in-from-right-4 duration-200">
-                <div className="mb-2 font-mono text-[9px] uppercase tracking-wider text-muted-foreground">Eco Overlays</div>
-                <div className="flex flex-col gap-2">
+              {/* Environment Overlay Sub-Panel */}
+              <div className="w-44 rounded-2xl border border-border bg-card/90 p-3.5 shadow-lg backdrop-blur-md">
+                <div className="mb-2 font-mono text-[9px] uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                  <Layers className="h-3.5 w-3.5 text-eco-orange" />
+                  <span>Map Overlays</span>
+                </div>
+                <div className="flex flex-col gap-2 font-sans">
                   {Object.entries({
                     air: { label: "Air Quality (PM2.5)", color: "text-eco-green" },
                     carbon: { label: "Carbon Load", color: "text-eco-blue" },
@@ -935,8 +955,8 @@ function MapPage() {
                     green: { label: "Green Cover", color: "text-green-500" },
                     noise: { label: "Noise Level", color: "text-purple-400" },
                   }).map(([key, info]) => (
-                    <label key={key} className="flex cursor-pointer items-center justify-between text-xs">
-                      <span className={info.color}>{info.label}</span>
+                    <label key={key} className="flex cursor-pointer items-center justify-between text-[11px] font-medium leading-none">
+                      <span className={info.color}>{info.label.split(" ")[0]}</span>
                       <input
                         type="checkbox"
                         checked={activeLayers[key as keyof typeof activeLayers]}
@@ -953,14 +973,27 @@ function MapPage() {
                             return next;
                           })
                         }
-                        className="accent-eco-orange cursor-pointer"
+                        className="accent-eco-orange cursor-pointer h-3 w-3 shrink-0 ml-1"
                         suppressHydrationWarning
                       />
                     </label>
                   ))}
                 </div>
               </div>
-            )}
+            </div>
+
+            {/* Quick Floating Map Utilities (Right side) */}
+            <div className="absolute right-4 top-24 z-10 flex flex-col gap-3">
+              {/* Geolocation FAB */}
+              <button
+                onClick={handleLocateMe}
+                className="flex h-12 w-12 items-center justify-center rounded-full border border-border bg-card/85 text-foreground shadow-lg backdrop-blur-md transition-transform active:scale-95 hover:bg-card"
+                title="Geolocate Live Position"
+                suppressHydrationWarning
+              >
+                <Crosshair className="h-5 w-5 text-eco-blue" />
+              </button>
+            </div>
 
             {/* BOTTOM SHEET: Routes list overlay if destination selected */}
             {isRoutingMode && endPt && (
@@ -1033,40 +1066,43 @@ function MapPage() {
           <div className="absolute inset-0 z-30 pointer-events-none flex flex-col justify-between p-4 pt-[max(1rem,env(safe-area-inset-top))]">
             
             {/* Top directions instruction card */}
-            <div className="w-full rounded-2xl border border-border bg-card/90 p-4 shadow-xl backdrop-blur-md pointer-events-auto flex items-center gap-3">
-              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-eco-orange text-background">
-                {navProgress < 3 ? (
-                  <Navigation className="h-5 w-5 fill-current rotate-45" />
-                ) : navProgress < 7 ? (
-                  <Navigation className="h-5 w-5 fill-current -rotate-45" />
-                ) : (
-                  <MapPin className="h-5 w-5" />
-                )}
-              </span>
-              <div className="flex-1 min-w-0">
-                <span className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground">Upcoming turn</span>
-                <div className="text-xs font-semibold leading-tight text-foreground truncate">
-                  {navProgress < 3
-                    ? "In 300m, turn left onto Cubbon Rd"
-                    : navProgress < 7
-                      ? "In 500m, keep right toward Residency Rd"
-                      : "Proceed to destination"}
+            {(() => {
+              const direction = getDirectionsInstruction(navProgress, navPath.length);
+              return (
+                <div className="w-full rounded-2xl border border-border bg-card/90 p-4 shadow-xl backdrop-blur-md pointer-events-auto flex items-center gap-3 animate-in slide-in-from-top duration-300">
+                  <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-eco-orange text-background transition-all duration-300">
+                    {direction.type === "right" ? (
+                      <Navigation className="h-5 w-5 fill-current rotate-90" />
+                    ) : direction.type === "left" ? (
+                      <Navigation className="h-5 w-5 fill-current -rotate-90" />
+                    ) : direction.type === "arrive" ? (
+                      <MapPin className="h-5 w-5" />
+                    ) : (
+                      <Navigation className="h-5 w-5 fill-current" />
+                    )}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <span className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground">Upcoming turn</span>
+                    <div className="text-xs font-semibold leading-tight text-foreground truncate">
+                      {direction.text}
+                    </div>
+                  </div>
+                  <button
+                    onClick={exitNavigation}
+                    className="flex h-7 w-7 items-center justify-center rounded-full border border-border bg-background hover:bg-card text-muted-foreground hover:text-foreground"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                  <Link
+                    to="/ar"
+                    className="flex h-7 w-7 items-center justify-center rounded-full border border-eco-orange/40 bg-eco-orange/15 text-eco-orange hover:bg-eco-orange/25"
+                    title="Switch to AR navigation"
+                  >
+                    <ScanLine className="h-3.5 w-3.5" />
+                  </Link>
                 </div>
-              </div>
-              <button
-                onClick={exitNavigation}
-                className="flex h-7 w-7 items-center justify-center rounded-full border border-border bg-background hover:bg-card text-muted-foreground hover:text-foreground"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-              <Link
-                to="/ar"
-                className="flex h-7 w-7 items-center justify-center rounded-full border border-eco-orange/40 bg-eco-orange/15 text-eco-orange hover:bg-eco-orange/25"
-                title="Switch to AR navigation"
-              >
-                <ScanLine className="h-3.5 w-3.5" />
-              </Link>
-            </div>
+              );
+            })()}
 
             {/* Simulated mid-route environmental hazard spike alert */}
             {showSpikeAlert && (
@@ -1532,5 +1568,4 @@ function generateMockEnvironmentFeatures(bbox: string, activeKey: string) {
     features: features
   };
 }
-
 

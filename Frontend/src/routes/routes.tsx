@@ -106,7 +106,7 @@ function RoutesPage() {
               const active = selected === r.type;
               return (
                 <button
-                  key={r.type}
+                  key={r.route_id ?? r.type}
                   onClick={() => setSelected(r.type)}
                   className={cn(
                     "w-full rounded-2xl border bg-card p-4 text-left transition-colors",
@@ -118,7 +118,12 @@ function RoutesPage() {
                       <span className="text-base font-semibold">{r.label}</span>
                       {r.recommended && (
                         <span className="inline-flex items-center gap-1 rounded-full bg-eco-green/15 px-2 py-0.5 font-mono text-[10px] uppercase text-eco-green">
-                          <CheckCircle2 className="h-3 w-3" /> Recommended
+                          <CheckCircle2 className="h-3 w-3" /> PPO Pick
+                        </span>
+                      )}
+                      {r.degradation_warning && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-eco-orange/15 px-2 py-0.5 font-mono text-[10px] uppercase text-eco-orange">
+                          <AlertTriangle className="h-3 w-3" /> Warning
                         </span>
                       )}
                     </div>
@@ -144,6 +149,31 @@ function RoutesPage() {
                       <Cloud className="h-3 w-3" /> {r.co2_grams.toFixed(0)} g
                     </div>
                   </div>
+                  {(r.ecoscore_t10 || r.ecoscore_t20 || r.ecoscore_t30) && (
+                    <div className="mt-3 flex items-center gap-1.5 font-mono text-[10px] text-muted-foreground">
+                      {[r.ecoscore_now ?? r.ecoscore, r.ecoscore_t10, r.ecoscore_t20, r.ecoscore_t30].map((score, index) => (
+                        <span
+                          key={index}
+                          className={cn(
+                            "h-1.5 flex-1 rounded-full",
+                            (score ?? 0) >= 70 ? "bg-eco-green/70" : (score ?? 0) >= 50 ? "bg-eco-orange/70" : "bg-eco-red/70",
+                          )}
+                          title={`${index === 0 ? "Now" : `T+${index * 10}`}: ${score}`}
+                        />
+                      ))}
+                      <span className="ml-1 shrink-0">30m</span>
+                    </div>
+                  )}
+                  {r.forecast_note && (
+                    <p className="mt-2 text-[11px] leading-snug text-muted-foreground">
+                      {r.forecast_note}
+                    </p>
+                  )}
+                  {r.degradation_warning && (
+                    <p className="mt-1 text-[11px] leading-snug text-eco-orange">
+                      {r.degradation_warning}
+                    </p>
+                  )}
                 </button>
               );
             })}

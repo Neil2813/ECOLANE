@@ -36,6 +36,27 @@ function generateRoutePoints(
   return pts;
 }
 
+// Helper for dynamic turn-by-turn directions based on progress
+function getDirectionsInstruction(progress: number, pathLength: number) {
+  if (pathLength === 0) return { text: "Proceed to destination", type: "straight" };
+  
+  const remainingSteps = pathLength - progress;
+  if (remainingSteps <= 1) {
+    return { text: "Arrived at your destination", type: "arrive" };
+  }
+
+  if (progress < 3) {
+    const meters = Math.max(50, 250 - progress * 50);
+    return { text: `In ${meters} meters, take a right onto Cubbon Rd`, type: "right" };
+  } else if (progress < 7) {
+    const meters = Math.max(50, 400 - (progress - 3) * 50);
+    return { text: `In ${meters} meters, turn left toward Residency Rd`, type: "left" };
+  } else {
+    const meters = Math.max(50, 150 - (progress - 7) * 50);
+    return { text: `In ${meters} meters, proceed straight to destination`, type: "straight" };
+  }
+}
+
 export const Route = createFileRoute("/ar")({
   head: () => ({ meta: [{ title: "AR Mode · EcoLens" }] }),
   component: ARPage,
@@ -377,7 +398,7 @@ function ARPage() {
 
   return (
     <MobileShell>
-      <div className="relative h-[calc(100vh-6rem)] overflow-hidden bg-black">
+      <div className="relative h-dvh min-h-[480px] overflow-hidden bg-background">
         {/* Live Camera Feed */}
         {permissionState === "granted" && (
           <video
@@ -391,7 +412,7 @@ function ARPage() {
 
         {/* Fallback Ambient Background */}
         {permissionState !== "granted" && (
-          <div className="absolute inset-0 bg-gradient-to-b from-background via-black to-eco-green/10 z-0" />
+          <div className="absolute inset-0 bg-gradient-to-b from-background to-eco-green/10 z-0" />
         )}
 
         {/* Scanning Sweep Line */}
@@ -629,29 +650,32 @@ function ARPage() {
                 </div>
 
                 {/* Turn instruction */}
-                <div className="flex items-center gap-3 py-1">
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-eco-orange text-background">
-                    {navState.navProgress < 3 ? (
-                      <Navigation className="h-4.5 w-4.5 fill-current rotate-45" />
-                    ) : navState.navProgress < 7 ? (
-                      <Navigation className="h-4.5 w-4.5 fill-current -rotate-45" />
-                    ) : (
-                      <MapPin className="h-4.5 w-4.5" />
-                    )}
-                  </span>
-                  <div className="flex-1 min-w-0">
-                    <span className="font-mono text-[8px] uppercase tracking-wider text-muted-foreground">
-                      Upcoming guidance
-                    </span>
-                    <div className="text-xs font-semibold leading-tight text-foreground truncate">
-                      {navState.navProgress < 3
-                        ? "In 300m, turn left onto Cubbon Rd"
-                        : navState.navProgress < 7
-                          ? "In 500m, keep right toward Residency Rd"
-                          : "Proceed to destination"}
+                {(() => {
+                  const direction = getDirectionsInstruction(navState.navProgress, navState.navPath.length);
+                  return (
+                    <div className="flex items-center gap-3 py-1">
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-eco-orange text-background">
+                        {direction.type === "right" ? (
+                          <Navigation className="h-4.5 w-4.5 fill-current rotate-90" />
+                        ) : direction.type === "left" ? (
+                          <Navigation className="h-4.5 w-4.5 fill-current -rotate-90" />
+                        ) : direction.type === "arrive" ? (
+                          <MapPin className="h-4.5 w-4.5" />
+                        ) : (
+                          <Navigation className="h-4.5 w-4.5 fill-current" />
+                        )}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <span className="font-mono text-[8px] uppercase tracking-wider text-muted-foreground">
+                          Upcoming guidance
+                        </span>
+                        <div className="text-xs font-semibold leading-tight text-foreground truncate">
+                          {direction.text}
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
+                  );
+                })()}
 
                 <div className="flex items-center justify-between mt-1.5">
                   <div>

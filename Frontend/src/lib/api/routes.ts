@@ -1,13 +1,25 @@
 import { apiFetch } from "./client";
 
 export interface RouteOption {
-  type: "fastest" | "cleanest_air" | "lowest_carbon";
+  rank?: number;
+  route_id?: string;
+  type: string;
   label: string;
   duration_min: number;
   distance_km: number;
   pm25_exposure: number;
   co2_grams: number;
   ecoscore: number;
+  ecoscore_now?: number;
+  ecoscore_t10?: number;
+  ecoscore_t20?: number;
+  ecoscore_t30?: number;
+  heat_score?: number;
+  noise_db?: number;
+  current_users_on_route?: number;
+  ppo_recommended?: boolean;
+  degradation_warning?: string | null;
+  forecast_note?: string | null;
   /** Array of [lng, lat] coordinate pairs forming the route polyline */
   polyline: [number, number][];
   segment_ids: string[];
@@ -16,6 +28,13 @@ export interface RouteOption {
 
 export interface GenerateRoutesResponse {
   routes: RouteOption[];
+  recommended_index?: number;
+  total_routes_found?: number;
+  routes_shown?: number;
+  load_distribution_active?: boolean;
+  city_avg_pm25_now?: number;
+  city_avg_pm25_t10?: number;
+  generated_at?: string;
 }
 
 export async function generateRoutes(
